@@ -23,6 +23,7 @@ class _QuickReplyOverlayState extends State<QuickReplyOverlay> {
     {'title': 'Address', 'content': 'Kantor kami berlokasi di Jl. Sudirman No.1, Jakarta Pusat.'},
   ];
   
+  
   List<Map<String, String>> _filteredReplies = [];
 
   @override
