@@ -68,6 +68,8 @@ class AppConfig {
   static const String tokenKey = 'auth_token';
   static const String userDataKey = 'user_data';
   static const String settingsKey = 'app_settings';
+  static const String lastUsernameKey = 'last_username';
+  static const String lastPasswordKey = 'last_password';
   
   // App Constants
   static const int messagePageSize = 20;

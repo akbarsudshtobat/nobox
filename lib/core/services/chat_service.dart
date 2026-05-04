@@ -91,6 +91,13 @@ class ChatService {
             final tId = item['TenantId']?.toString();
             if (tId != null && tId.isNotEmpty) {
               currentTenantId = tId;
+              // CRITICAL: Simpan tenantId ke secure storage agar SignalR bisa subscribe
+              const storage = FlutterSecureStorage();
+              storage.write(key: 'tenant_id', value: tId).then((_) {
+                debugPrint('ChatService: ✅ TenantId saved to storage: $tId');
+                // Trigger SignalR subscription sekarang tenantId tersedia
+                SignalRService().trySubscribe();
+              });
             }
             return item;
           }

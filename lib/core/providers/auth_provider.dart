@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../model/api_response.dart';
 import '../model/login_request.dart';
 import '../services/api_client.dart';
+import '../app_config.dart';
 import '../utils/globals.dart';
 import '../utils/app_routes.dart';
 
@@ -53,9 +54,22 @@ class AuthProvider with ChangeNotifier {
       }
     }
     
-    // If we STILL don't have a token, mark user as logged out
+    // Jika tidak ada token tapi ada saved credentials → silent re-login
     if (_token == null) {
-      _currentUser = null;
+      final savedUsername = await _secureStorage.read(key: AppConfig.lastUsernameKey);
+      final savedPassword = await _secureStorage.read(key: AppConfig.lastPasswordKey);
+      if (savedUsername != null && savedPassword != null) {
+        debugPrint('AuthProvider: No token but credentials found, attempting silent re-login...');
+        final result = await tryAutoReLogin();
+        if (result) {
+          debugPrint('AuthProvider: ✅ Silent re-login successful in checkAuth');
+        } else {
+          debugPrint('AuthProvider: ❌ Silent re-login failed in checkAuth');
+          _currentUser = null;
+        }
+      } else {
+        _currentUser = null;
+      }
     }
 
     // Restore token in AuthService/ApiClient if it exists
@@ -97,6 +111,11 @@ class AuthProvider with ChangeNotifier {
         // Store token in secure storage instead of SharedPreferences
         await _secureStorage.write(key: _secureTokenKey, value: response.data!);
         
+        // Simpan credentials untuk auto re-login saat token expired
+        await _secureStorage.write(key: AppConfig.lastUsernameKey, value: email);
+        await _secureStorage.write(key: AppConfig.lastPasswordKey, value: password);
+        debugPrint('AuthProvider: ✅ Credentials saved for auto re-login');
+        
         _currentUser = email;
         _token = response.data;
         
@@ -116,6 +135,47 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Silent re-login menggunakan saved credentials.
+  /// Dipanggil dari splash_page, chat_detail, atau interceptor.
+  /// Return true jika berhasil, false jika gagal.
+  Future<bool> tryAutoReLogin() async {
+    try {
+      final savedUsername = await _secureStorage.read(key: AppConfig.lastUsernameKey);
+      final savedPassword = await _secureStorage.read(key: AppConfig.lastPasswordKey);
+
+      if (savedUsername == null || savedPassword == null) {
+        debugPrint('AuthProvider: tryAutoReLogin - No saved credentials');
+        return false;
+      }
+
+      debugPrint('AuthProvider: 🔑 tryAutoReLogin for $savedUsername...');
+
+      final response = await _authService.login(
+        LoginRequest(username: savedUsername, password: savedPassword),
+      );
+
+      if (!response.isError && response.data != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_userEmailKey, savedUsername);
+        await _secureStorage.write(key: _secureTokenKey, value: response.data!);
+
+        _currentUser = savedUsername;
+        _token = response.data;
+        ApiClient().setToken(_token);
+
+        notifyListeners();
+        debugPrint('AuthProvider: ✅ tryAutoReLogin successful');
+        return true;
+      }
+
+      debugPrint('AuthProvider: ❌ tryAutoReLogin failed: ${response.error}');
+      return false;
+    } catch (e) {
+      debugPrint('AuthProvider: ❌ tryAutoReLogin error: $e');
+      return false;
+    }
+  }
+
   void logout() async {
     // Guard: if already logged out, don't re-run logout logic.
     // This prevents repeated background 401/AccessDenied responses from
@@ -132,6 +192,10 @@ class AuthProvider with ChangeNotifier {
     
     // Delete token from secure storage
     await _secureStorage.delete(key: _secureTokenKey);
+    
+    // JANGAN hapus last_username & last_password saat logout
+    // agar user bisa auto re-login saat buka app lagi
+    // (credentials dihapus hanya jika user ganti akun)
     
     _currentUser = null;
     _token = null;

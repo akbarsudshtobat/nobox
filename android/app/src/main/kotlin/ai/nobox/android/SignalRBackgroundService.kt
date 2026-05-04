@@ -5,22 +5,26 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.microsoft.signalr.HubConnection
 import com.microsoft.signalr.HubConnectionBuilder
 import com.microsoft.signalr.HubConnectionState
 import io.reactivex.rxjava3.core.Single
+import org.json.JSONObject
 
 class SignalRBackgroundService : Service() {
 
     companion object {
+        private const val TAG = "NOBOX_BG_SIGNALR"
         private const val CHANNEL_ID = "signalr_service_channel"
+        private const val CHAT_CHANNEL_ID = "chat_notifications"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_START = "START_SIGNALR_SERVICE"
         private const val ACTION_STOP = "STOP_SIGNALR_SERVICE"
         private const val EXTRA_TOKEN = "EXTRA_JWT_TOKEN"
 
-        // Fungsi yang bisa dipanggil dari MainActivity
         fun startService(context: Context, token: String) {
             val intent = Intent(context, SignalRBackgroundService::class.java).apply {
                 action = ACTION_START
@@ -43,49 +47,139 @@ class SignalRBackgroundService : Service() {
 
     private var hubConnection: HubConnection? = null
     private var token: String? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
+        acquireWakeLock()
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        super.onDestroy()
+    }
+
+    private fun acquireWakeLock() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "nobox:signalr_bg")
+        wakeLock?.acquire(60 * 60 * 1000L) // 1 jam max
+        Log.d(TAG, "WakeLock acquired")
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+        Log.d(TAG, "WakeLock released")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
                 token = intent.getStringExtra(EXTRA_TOKEN)
-                startForeground(NOTIFICATION_ID, createNotification("Service Running", "Menghubungkan ke Nobox.ai..."))
+                Log.d(TAG, "START received. Token length=${token?.length ?: 0}")
+                startForeground(NOTIFICATION_ID, createServiceNotification("Menghubungkan..."))
                 startSignalRListener()
             }
             ACTION_STOP -> {
+                Log.d(TAG, "STOP received.")
                 stopSignalRListener()
                 stopForeground(true)
                 stopSelf()
             }
         }
-        return START_STICKY // Service ditarik lagi sistem
+        return START_STICKY
     }
 
     private fun startSignalRListener() {
-        if (hubConnection?.connectionState == HubConnectionState.CONNECTED) return
+        if (hubConnection?.connectionState == HubConnectionState.CONNECTED) {
+            Log.d(TAG, "Already connected, skip.")
+            return
+        }
 
         try {
-            // Setup Koneksi ke Nobox API
             hubConnection = HubConnectionBuilder.create("https://id.nobox.ai/messagehub")
                 .withAccessTokenProvider(Single.defer { Single.just(token ?: "") })
                 .build()
 
-            // Trigger Notifikasi Saat ada pesan masuk
-            hubConnection?.on("ReceiveMessage", { messageBody: String ->
-                triggerHeadsUpNotification("Pesan Baru", messageBody)
-            }, String::class.java)
+            // Pakai Object agar fleksibel menerima String maupun Map dari server
+            hubConnection?.on("TerimaPesan", { rawRoom: Any, rawMsg: Any ->
+                Log.d(TAG, ">>> TerimaPesan! room=${rawRoom}, msg=${rawMsg.toString().take(100)}")
+                handleIncomingMessage(rawRoom.toString(), rawMsg.toString())
+            }, Object::class.java, Object::class.java)
 
-            // Memulai koneksi background
-            hubConnection?.start()?.blockingAwait()
-            updateNotification("Tersambung / Aktif")
+            // Retry mechanism dengan exponential backoff
+            val maxRetries = 3
+            val retryDelays = longArrayOf(5000, 10000, 20000) // 5s, 10s, 20s
+            
+            for (attempt in 0..maxRetries) {
+                try {
+                    Log.d(TAG, "Starting connection... (attempt ${attempt + 1}/${maxRetries + 1})")
+                    hubConnection?.start()?.blockingAwait()
+                    Log.d(TAG, "CONNECTED! id=${hubConnection?.connectionId}")
+                    updateServiceNotification("Tersambung / Aktif")
+                    return // Berhasil, keluar dari loop
+                } catch (e: Exception) {
+                    Log.e(TAG, "Connection attempt ${attempt + 1} FAILED: ${e.message}")
+                    if (attempt < maxRetries) {
+                        val delay = retryDelays[attempt]
+                        Log.d(TAG, "Retrying in ${delay / 1000}s...")
+                        updateServiceNotification("Retry ${attempt + 2}...")
+                        Thread.sleep(delay)
+                    } else {
+                        Log.e(TAG, "All connection attempts failed!")
+                        updateServiceNotification("Gagal: ${e.message?.take(40)}")
+                    }
+                }
+            }
         } catch (e: Exception) {
-            e.printStackTrace()
-            updateNotification("Koneksi terputus")
+            Log.e(TAG, "Connection setup FAILED: ${e.message}")
+            updateServiceNotification("Gagal: ${e.message?.take(40)}")
         }
+    }
+
+    private fun handleIncomingMessage(roomIdRaw: String, rawMsg: String) {
+        var msgText = "Anda mendapat pesan baru"
+        try {
+            val json = JSONObject(rawMsg)
+            val m = json.optString("Msg", "")
+            if (m.isNotEmpty()) msgText = m
+        } catch (e: Exception) {
+            Log.w(TAG, "JSON parse: ${e.message}")
+        }
+        showChatNotification(msgText)
+    }
+
+    private fun showChatNotification(messageText: String) {
+        Log.d(TAG, "Showing notif: $messageText")
+        val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pi = PendingIntent.getActivity(
+            this, System.currentTimeMillis().toInt(),
+            intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notif = NotificationCompat.Builder(this, CHAT_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.launcher_icon)
+            .setContentTitle("Pesan Baru")
+            .setContentText(messageText)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .setFullScreenIntent(pi, true) // Tembus MIUI lock screen
+            .build()
+
+        val uniqueId = (System.currentTimeMillis() % 100000).toInt() + 2000
+        mgr.notify(uniqueId, notif)
+        Log.d(TAG, "Notif posted id=$uniqueId")
     }
 
     private fun stopSignalRListener() {
@@ -93,65 +187,36 @@ class SignalRBackgroundService : Service() {
         hubConnection = null
     }
 
-    private fun triggerHeadsUpNotification(title: String, messageText: String) {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        
-        // Channel ID sama persis dengan FCM
-        val highPriorityChannelId = "chat_notifications" 
-        
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                highPriorityChannelId, 
-                "Notifikasi Chat Baru", 
-                NotificationManager.IMPORTANCE_HIGH
-            )
-            notificationManager.createNotificationChannel(channel)
-        }
-
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val notification = NotificationCompat.Builder(this, highPriorityChannelId)
-            .setSmallIcon(R.mipmap.launcher_icon) 
-            .setContentTitle(title)
-            .setContentText(messageText)
-            .setPriority(NotificationCompat.PRIORITY_HIGH) 
-            .setDefaults(Notification.DEFAULT_ALL)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .build()
-            
-        notificationManager.notify((System.currentTimeMillis() % 10000).toInt(), notification)
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, 
-                "SignalR Foreground Tracker", 
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            val mgr = getSystemService(NotificationManager::class.java)
+            // Low-priority service channel
+            mgr.createNotificationChannel(NotificationChannel(
+                CHANNEL_ID, "SignalR Background", NotificationManager.IMPORTANCE_LOW
+            ))
+            // High-priority chat channel
+            mgr.createNotificationChannel(NotificationChannel(
+                CHAT_CHANNEL_ID, "Notifikasi Chat", NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                enableVibration(true)
+                enableLights(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            })
         }
     }
 
-    private fun createNotification(title: String, text: String): Notification {
+    private fun createServiceNotification(text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
+            .setContentTitle("Nobox Chat")
             .setContentText(text)
             .setSmallIcon(R.mipmap.launcher_icon)
-            .setOngoing(true) 
+            .setOngoing(true)
             .build()
     }
 
-    private fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, createNotification("Nobox Chat Background", text))
+    private fun updateServiceNotification(text: String) {
+        val mgr = getSystemService(NotificationManager::class.java)
+        mgr.notify(NOTIFICATION_ID, createServiceNotification(text))
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

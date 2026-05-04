@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:signalr_netcore/signalr_client.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../app_config.dart';
+import 'push_notification_service.dart';
 
 /// SignalR service for real-time messaging via the NoBox messagehub.
 ///
@@ -19,6 +20,7 @@ class SignalRService {
 
   HubConnection? _hubConnection;
   bool _isConnected = false;
+  bool _isSubscribed = false;
   bool get isConnected => _isConnected;
 
   // ── NoBox Server Event Names ──
@@ -47,9 +49,28 @@ class SignalRService {
 
   /// Connect to the SignalR hub with the user's auth token.
   Future<void> connect() async {
-    if (_isConnected && _hubConnection != null) {
-      debugPrint('SignalR: Already connected');
-      return;
+    if (_hubConnection != null) {
+      if (_hubConnection!.state == HubConnectionState.Connected) {
+        debugPrint('SignalR: Already connected');
+        _isConnected = true;
+        return;
+      }
+      if (_hubConnection!.state == HubConnectionState.Disconnected) {
+        debugPrint('SignalR: Reconnecting existing disconnected hub...');
+        try {
+          await _hubConnection!.start();
+          _isConnected = true;
+          _isSubscribed = false;
+          _connectionStateController.add(true);
+          debugPrint('SignalR: ✅ Reconnected successfully!');
+          // CRITICAL: Re-subscribe setelah reconnect
+          await _subscribeUser();
+          return;
+        } catch (e) {
+          debugPrint('SignalR: ❌ Reconnection failed, building new connection: $e');
+          // Fall through to build a new connection
+        }
+      }
     }
 
     try {
@@ -69,11 +90,36 @@ class SignalRService {
           .withAutomaticReconnect()
           .build();
 
+      // Perbesar timeout agar tidak mudah disconnect di jaringan mobile
+      _hubConnection!.serverTimeoutInMilliseconds = 30000;  // 30 detik (default 2 detik)
+      _hubConnection!.keepAliveIntervalInMilliseconds = 15000; // 15 detik
+
       // ── Register handlers for NoBox events ──
-      _hubConnection!.on(eventTerimaPesan, _handleTerimaPesan);
-      _hubConnection!.on(eventTerimaSubSpv, _handleTerimaSubSpv);
-      _hubConnection!.on(eventUcChanged, _handleUcChanged);
-      _hubConnection!.on(eventTerimaExpired, _handleTerimaExpired);
+      debugPrint('SignalR: Registering event handlers...');
+      
+      _hubConnection!.on(eventTerimaPesan, (args) {
+        debugPrint('SignalR: 🔥🔥🔥 RAW TerimaPesan RECEIVED! args.length=${args?.length}');
+        debugPrint('SignalR: 🔥 arg[0]=${args?[0]?.toString().substring(0, (args?[0]?.toString().length ?? 0) > 100 ? 100 : (args?[0]?.toString().length ?? 0))}');
+        if (args != null && args.length > 1) {
+          debugPrint('SignalR: 🔥 arg[1]=${args[1]?.toString().substring(0, (args[1]?.toString().length ?? 0) > 200 ? 200 : (args[1]?.toString().length ?? 0))}');
+        }
+        _handleTerimaPesan(args);
+      });
+      
+      _hubConnection!.on(eventTerimaSubSpv, (args) {
+        debugPrint('SignalR: 🔥 RAW TerimaSubSpv RECEIVED! args.length=${args?.length}');
+        _handleTerimaSubSpv(args);
+      });
+      
+      _hubConnection!.on(eventUcChanged, (args) {
+        debugPrint('SignalR: 🔥 RAW UcChanged RECEIVED! args.length=${args?.length}');
+        _handleUcChanged(args);
+      });
+      
+      _hubConnection!.on(eventTerimaExpired, (args) {
+        debugPrint('SignalR: 🔥 RAW TerimaExpired RECEIVED! args.length=${args?.length}');
+        _handleTerimaExpired(args);
+      });
 
       // ── Connection state handlers ──
       _hubConnection!.onclose(({error}) {
@@ -91,7 +137,10 @@ class SignalRService {
       _hubConnection!.onreconnected(({connectionId}) {
         debugPrint('SignalR: Reconnected! ConnectionId: $connectionId');
         _isConnected = true;
+        _isSubscribed = false;
         _connectionStateController.add(true);
+        // Re-subscribe setelah reconnect (seperti project mentor)
+        _subscribeUser();
       });
 
       // Start the connection
@@ -100,7 +149,12 @@ class SignalRService {
       _connectionStateController.add(true);
       debugPrint('SignalR: ✅ Connected successfully!');
       debugPrint('SignalR: ConnectionId = ${_hubConnection!.connectionId}');
+      debugPrint('SignalR: State = ${_hubConnection!.state}');
       debugPrint('SignalR: Listening for: $eventTerimaPesan, $eventTerimaSubSpv, $eventUcChanged, $eventTerimaExpired');
+
+      // CRITICAL: Subscribe user agar server tahu harus kirim event ke koneksi ini
+      // (Seperti project mentor: SubscribeUserAgent + SubscribeUserSpv)
+      await _subscribeUser();
 
     } catch (e, stack) {
       debugPrint('SignalR: ❌ Connection failed: $e');
@@ -108,6 +162,92 @@ class SignalRService {
       _isConnected = false;
       _connectionStateController.add(false);
     }
+  }
+
+  // ══════════════════════════════════════════════
+  //  User Subscription (CRITICAL - dari project mentor)
+  // ══════════════════════════════════════════════
+
+  /// Subscribe user ke SignalR hub agar menerima event.
+  /// Tanpa ini, server TIDAK akan mengirim TerimaPesan, TerimaSubSpv, dll.
+  Future<void> _subscribeUser() async {
+    if (_hubConnection == null || _hubConnection!.state != HubConnectionState.Connected) {
+      debugPrint('SignalR: ⚠️ Cannot subscribe - not connected');
+      return;
+    }
+
+    try {
+      const storage = FlutterSecureStorage();
+
+      // 1. Ambil userId dari JWT token
+      final token = await storage.read(key: 'auth_token');
+      if (token == null) {
+        debugPrint('SignalR: ⚠️ Cannot subscribe - no token');
+        return;
+      }
+
+      String userId = '1';
+      try {
+        final parts = token.split('.');
+        if (parts.length == 3) {
+          final payload = base64Url.normalize(parts[1]);
+          final decoded = utf8.decode(base64Url.decode(payload));
+          final payloadMap = jsonDecode(decoded);
+          userId = payloadMap['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier']
+              ?? payloadMap['nameid']
+              ?? payloadMap['sub']
+              ?? '1';
+        }
+      } catch (e) {
+        debugPrint('SignalR: ⚠️ Failed to decode JWT: $e');
+      }
+
+      // 2. Ambil tenantId dari secure storage
+      final tenantId = await storage.read(key: 'tenant_id');
+      if (tenantId == null || tenantId.isEmpty) {
+        debugPrint('SignalR: ⚠️ TenantId not available yet, subscription deferred');
+        debugPrint('SignalR: ⚠️ Will be called via trySubscribe() when ChatService loads accounts');
+        return;
+      }
+
+      debugPrint('SignalR: 📡 Subscribing user - UserId: $userId, TenantId: $tenantId');
+
+      // 3. Subscribe sebagai Agent (untuk pesan & room yang di-assign ke agent ini)
+      try {
+        await _hubConnection!.invoke('SubscribeUserAgent', args: [userId, tenantId]);
+        debugPrint('SignalR: ✅ Subscribed as Agent');
+      } catch (e) {
+        debugPrint('SignalR: ❌ SubscribeUserAgent failed: $e');
+      }
+
+      // 4. Subscribe sebagai Supervisor (untuk SEMUA room di tenant)
+      try {
+        await _hubConnection!.invoke('SubscribeUserSpv', args: [tenantId]);
+        debugPrint('SignalR: ✅ Subscribed as Supervisor');
+      } catch (e) {
+        debugPrint('SignalR: ⚠️ SubscribeUserSpv failed: $e');
+      }
+
+      _isSubscribed = true;
+      debugPrint('SignalR: 🎉 Subscription complete - ready to receive real-time events!');
+    } catch (e) {
+      debugPrint('SignalR: ❌ Subscription failed: $e');
+    }
+  }
+
+  /// Public method: dipanggil dari ChatService setelah tenantId tersedia.
+  /// Kalau sudah subscribe, skip. Kalau belum, subscribe sekarang.
+  Future<void> trySubscribe() async {
+    if (_isSubscribed) {
+      debugPrint('SignalR: Already subscribed, skip');
+      return;
+    }
+    if (!_isConnected) {
+      debugPrint('SignalR: Not connected yet, cannot subscribe');
+      return;
+    }
+    debugPrint('SignalR: 🔄 trySubscribe called - attempting subscription...');
+    await _subscribeUser();
   }
 
   // ══════════════════════════════════════════════
@@ -155,19 +295,71 @@ class SignalRService {
 
       debugPrint('SignalR: 📩 TerimaPesan | room=$roomId | msg=${messageData['Msg']}');
 
-      // Emit to typed stream
+      // Emit to typed stream (untuk consumer lain: chat_detail_page, dll)
       _terimaPesanController.add(parsed);
 
-      // Emit to generic stream — put parsed messageData as args[0]
-      // so existing consumers can access RoomId, Msg, In, etc.
+      // Emit to generic stream
       _messageController.add({
         'method': eventTerimaPesan,
         'arguments': [messageData],
         'parsed': parsed,
         'timestamp': DateTime.now().toIso8601String(),
       });
+
+      // ── Langsung trigger notifikasi dari sini (seperti project mentor) ──
+      _handleNewMessageNotification(roomId, messageData, senderData);
+
     } catch (e) {
       debugPrint('SignalR: ❌ Error parsing TerimaPesan: $e');
+    }
+  }
+
+  /// Tampilkan notifikasi untuk pesan masuk baru.
+  /// Dipanggil langsung dari _handleTerimaPesan (seperti project mentor).
+  ///
+  /// Suppression rules:
+  /// - Skip jika pesan dari agent (agentId > 0)
+  /// - Skip jika user sedang di room yang sama
+  /// - Skip jika pesan kosong
+  void _handleNewMessageNotification(
+    String roomId,
+    Map<String, dynamic> messageData,
+    Map<String, dynamic>? senderData,
+  ) {
+    try {
+      final agentId = messageData['AgentId'];
+      final msgText = messageData['Msg']?.toString() ?? '';
+      final senderName = senderData?['Name']?.toString() ?? 'Pesan Baru';
+
+      // Skip notifikasi untuk pesan dari agent (termasuk pesan sendiri)
+      if (agentId != null && agentId != 0 && agentId.toString() != '0') {
+        debugPrint('SignalR: 🔕 Skip notification (agent message) room=$roomId');
+        return;
+      }
+
+      // Skip jika pesan kosong
+      if (msgText.isEmpty) {
+        debugPrint('SignalR: 🔕 Skip notification (empty message) room=$roomId');
+        return;
+      }
+
+      // Skip jika user sedang membuka room ini
+      final currentRoomId = PushNotificationService.currentRoomId;
+      if (currentRoomId != null && currentRoomId == roomId) {
+        debugPrint('SignalR: 🔕 Skip notification (user in room) room=$roomId');
+        return;
+      }
+
+      // Tampilkan notifikasi
+      debugPrint('SignalR: 🔔 Showing notification for room=$roomId sender=$senderName');
+      PushNotificationService.showChatNotification(
+        roomId: roomId,
+        roomName: senderName,
+        senderName: senderName,
+        message: msgText,
+      );
+    } catch (e) {
+      debugPrint('SignalR: ❌ Error showing notification: $e');
     }
   }
 
@@ -208,8 +400,64 @@ class SignalRService {
         'parsed': parsed,
         'timestamp': DateTime.now().toIso8601String(),
       });
+
+      // ── Trigger notifikasi dari TerimaSubSpv (server kirim ini untuk pesan masuk) ──
+      _handleSubSpvNotification(roomData);
     } catch (e) {
       debugPrint('SignalR: ❌ Error parsing TerimaSubSpv: $e');
+    }
+  }
+
+  /// Tampilkan notifikasi dari TerimaSubSpv event.
+  /// Server mengirim event ini saat ada pesan masuk, berisi data room + lastMsg + uc.
+  void _handleSubSpvNotification(Map<String, dynamic> roomData) {
+    try {
+      final roomId = roomData['Id']?.toString() ?? '';
+      final uc = roomData['Uc'];
+      final lastMsg = roomData['LastMsg']?.toString() ?? '';
+      final contactName = roomData['CtRealNm']?.toString() 
+          ?? roomData['Ct']?.toString() 
+          ?? roomData['Grp']?.toString() 
+          ?? 'Pesan Baru';
+      final agentId = roomData['AgentId'];
+      final upBy = roomData['UpBy'];
+
+      // Skip jika unread count = 0 (bukan pesan masuk baru, mungkin update status saja)
+      if (uc == null || uc == 0) {
+        debugPrint('SignalR: 🔕 Skip SubSpv notification (uc=0) room=$roomId');
+        return;
+      }
+
+      // Skip jika pesan terakhir dari agent (pesan keluar, bukan masuk)
+      if (upBy != null && upBy.toString() != '0') {
+        // upBy biasanya diisi userId agent yang mengirim pesan
+        // Tapi untuk pesan masuk dari customer, upBy bisa null atau 0
+        // Kita cek apakah lastMsg berubah karena pesan customer
+      }
+
+      // Skip jika pesan kosong
+      if (lastMsg.isEmpty) {
+        debugPrint('SignalR: 🔕 Skip SubSpv notification (empty message) room=$roomId');
+        return;
+      }
+
+      // Skip jika user sedang membuka room ini
+      final currentRoomId = PushNotificationService.currentRoomId;
+      if (currentRoomId != null && currentRoomId == roomId) {
+        debugPrint('SignalR: 🔕 Skip SubSpv notification (user in room) room=$roomId');
+        return;
+      }
+
+      // Tampilkan notifikasi
+      debugPrint('SignalR: 🔔 Showing notification from SubSpv | room=$roomId | sender=$contactName | msg=$lastMsg');
+      PushNotificationService.showChatNotification(
+        roomId: roomId,
+        roomName: contactName,
+        senderName: contactName,
+        message: lastMsg,
+      );
+    } catch (e) {
+      debugPrint('SignalR: ❌ Error in SubSpv notification: $e');
     }
   }
 

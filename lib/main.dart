@@ -12,6 +12,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'core/services/signalr_service.dart';
 import 'core/services/push_notification_service.dart';
+import 'core/services/background_service_manager.dart';
 import 'core/utils/app_routes.dart';
 import 'presentation/screens/splash/splash_page.dart';
 import 'presentation/screens/auth/login_page.dart';
@@ -56,9 +57,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   StreamSubscription<Map<String, dynamic>>? _terimaSubSpvSub;
   StreamSubscription<int>? _ucChangedSub;
   StreamSubscription<bool>? _reconnectSub;
-  AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
   Timer? _messagePollingTimer;
   bool _isPolling = false;
+  bool _wasInBackground = false; // Tracks if app went to background
 
   @override
   void initState() {
@@ -83,18 +84,29 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final wasPaused = _appLifecycleState == AppLifecycleState.paused ||
-        _appLifecycleState == AppLifecycleState.hidden;
-    _appLifecycleState = state;
     debugPrint('Main: App lifecycle state = $state');
 
-    // Stop polling in background, restart when resumed
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      _messagePollingTimer?.cancel();
-      _messagePollingTimer = null;
-      debugPrint('🔄 Polling stopped (app in background)');
-    } else if (state == AppLifecycleState.resumed && wasPaused) {
+      // Mark that we went to background
+      if (!_wasInBackground) {
+        _wasInBackground = true;
+        _messagePollingTimer?.cancel();
+        _messagePollingTimer = null;
+        debugPrint('🔄 Polling stopped (app in background)');
+        // Start native background service to keep SignalR alive
+        BackgroundServiceManager.startService();
+      }
+    } else if (state == AppLifecycleState.resumed && _wasInBackground) {
+      _wasInBackground = false;
+      debugPrint('🔄 App resumed from background — restoring connections...');
+
+      // Stop native background service (Flutter SignalR takes over)
+      BackgroundServiceManager.stopService();
       _startMessagePolling();
+      
+      // Ensure SignalR reconnects if it was disconnected by the OS while suspended
+      SignalRService().connect();
+
       // Sync data that might have been missed while backgrounded
       try {
         context.read<ChatProvider>().refreshFirstPage();
@@ -105,32 +117,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void _subscribeToSignalR() {
     final signalR = SignalRService();
 
-    // ── TerimaPesan: incoming chat message → show notification ──
+    // ── TerimaPesan: incoming chat message ──
+    // Notifikasi sudah di-handle langsung di signalr_service.dart (_handleNewMessageNotification)
+    // Listener ini hanya untuk logging/debugging
     _terimaPesanSub = signalR.onTerimaPesan.listen((data) {
       final roomId = data['roomId']?.toString() ?? '';
       final message = data['message'] as Map<String, dynamic>? ?? {};
       final sender = data['sender'] as Map<String, dynamic>?;
       final msgText = message['Msg']?.toString() ?? '';
       final senderName = sender?['Name']?.toString() ?? 'Pesan Baru';
-      final agentId = message['AgentId'];
 
       debugPrint('Main: TerimaPesan | room=$roomId | sender=$senderName | msg=$msgText');
-
-      // Skip our own outgoing messages
-      final isOurOwnMessage = agentId != null && agentId != 0 && agentId.toString() != '0';
-
-      if (!isOurOwnMessage) {
-        // Only show notification if user is NOT in this room
-        final isInRoom = PushNotificationService.currentRoomId == roomId;
-        if (!isInRoom && msgText.isNotEmpty) {
-          PushNotificationService.showChatNotification(
-            roomId: roomId,
-            roomName: senderName,
-            senderName: senderName,
-            message: msgText,
-          );
-        }
-      }
     });
 
     // ── TerimaSubSpv: room data update → update chat list directly ──
