@@ -1340,7 +1340,7 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
     String? selectedReadStatus = provider.filterReadStatus;
     String? selectedChannel = provider.filterChannel;
     String? selectedChat = provider.filterChatType;
-    String? selectedAccount = provider.filterAccount;
+    List<String> selectedAccountIds = List.from(provider.filterAccountIds);
     String? selectedContact = provider.filterContact;
     String? selectedLink = provider.filterLink;
     String? selectedGroup = provider.filterGroup;
@@ -1377,6 +1377,7 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
 
             final accountsRaw = snapshot.data?[1] as ApiResponse<List<Map<String, dynamic>>>?;
             final accounts = accountsRaw?.data?.map((e) => e['Name']?.toString() ?? '').where((e) => e.isNotEmpty).toList() ?? [];
+            final accountList = accountsRaw?.data ?? [];
 
             final contactsRaw = snapshot.data?[2] as ApiResponse<List<Map<String, dynamic>>>?;
             final contacts = contactsRaw?.data?.map((e) => e['Name']?.toString() ?? '').where((e) => e.isNotEmpty).toList() ?? [];
@@ -1404,7 +1405,7 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
 
             // Prevent dropdowns from crashing if the selected local value no longer exists in options list.
             if (selectedChannel != null && !channels.contains(selectedChannel) && selectedChannel != '--select--') channels.add(selectedChannel!);
-            if (selectedAccount != null && !accounts.contains(selectedAccount) && selectedAccount != '--select--') accounts.add(selectedAccount!);
+            // Account uses multi-select now, no string injection needed
             if (selectedContact != null && !contacts.contains(selectedContact) && selectedContact != '--select--') contacts.add(selectedContact!);
             if (selectedGroup != null && !groups.contains(selectedGroup) && selectedGroup != '--select--') groups.add(selectedGroup!);
             if (selectedCampaign != null && !campaigns.contains(selectedCampaign) && selectedCampaign != '--select--') campaigns.add(selectedCampaign!);
@@ -1486,7 +1487,7 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
                                     readStatus: selectedReadStatus,
                                     channel: selectedChannel,
                                     chatType: selectedChat,
-                                    account: selectedAccount,
+                                    accountIds: selectedAccountIds,
                                     contact: selectedContact,
                                     link: selectedLink,
                                     group: selectedGroup,
@@ -1516,7 +1517,7 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
                                     selectedReadStatus = null;
                                     selectedChannel = null;
                                     selectedChat = null;
-                                    selectedAccount = null;
+                                    selectedAccountIds = [];
                                     selectedContact = null;
                                     selectedLink = null;
                                     selectedGroup = null;
@@ -1564,9 +1565,99 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
                                 buildDropdownRow('Chat', selectedChat, ['Personal', 'Group'], (val) {
                                   setDialogState(() => selectedChat = val);
                                 }),
-                                buildDropdownRow('Account', selectedAccount, accounts.isEmpty ? ['All Accounts'] : accounts, (val) {
-                                  setDialogState(() => selectedAccount = val);
-                                }),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Row(
+                                    children: [
+                                      const SizedBox(
+                                        width: 120,
+                                        child: Text(
+                                          'Account',
+                                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: () {
+                                            showDialog(
+                                              context: context,
+                                              builder: (ctx) {
+                                                return StatefulBuilder(
+                                                  builder: (context, setMultiSelectState) {
+                                                    return AlertDialog(
+                                                      title: const Text('Pilih Akun', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                                                      content: accountList.isEmpty
+                                                          ? const Padding(padding: EdgeInsets.all(16), child: Text("No accounts available"))
+                                                          : SingleChildScrollView(
+                                                              child: Column(
+                                                                mainAxisSize: MainAxisSize.min,
+                                                                children: accountList.map((account) {
+                                                                  final id = account['Id']?.toString() ?? '';
+                                                                  final name = account['Name']?.toString() ?? account['Nm']?.toString() ?? 'Unknown';
+                                                                  final isChecked = selectedAccountIds.contains(id);
+
+                                                                  return CheckboxListTile(
+                                                                    title: Text(name, style: const TextStyle(fontSize: 14)),
+                                                                    value: isChecked,
+                                                                    controlAffinity: ListTileControlAffinity.leading,
+                                                                    contentPadding: EdgeInsets.zero,
+                                                                    visualDensity: VisualDensity.compact,
+                                                                    onChanged: (bool? value) {
+                                                                      setMultiSelectState(() {
+                                                                        if (value == true) {
+                                                                          selectedAccountIds.add(id);
+                                                                        } else {
+                                                                          selectedAccountIds.remove(id);
+                                                                        }
+                                                                      });
+                                                                      setDialogState(() {});
+                                                                    },
+                                                                  );
+                                                                }).toList(),
+                                                              ),
+                                                            ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () => Navigator.pop(ctx),
+                                                          child: const Text('Tutup'),
+                                                        ),
+                                                      ],
+                                                    );
+                                                  },
+                                                );
+                                              },
+                                            );
+                                          },
+                                          child: Container(
+                                            height: 44,
+                                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: Colors.grey.shade400),
+                                              borderRadius: BorderRadius.circular(8),
+                                              color: Colors.white,
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    selectedAccountIds.isEmpty 
+                                                      ? '--select--' 
+                                                      : '${selectedAccountIds.length} Selected',
+                                                    style: const TextStyle(fontSize: 14, color: Colors.black87),
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                Icon(Icons.keyboard_arrow_down, color: Colors.grey.shade700, size: 20),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                                 buildDropdownRow('Contact', selectedContact, contacts.isEmpty ? ['All Contacts'] : contacts, (val) {
                                   setDialogState(() => selectedContact = val);
                                 }),

@@ -36,6 +36,7 @@ import '../../../core/services/push_notification_service.dart';
 import '../../widgets/message_bubble_widget.dart';
 import '../../widgets/voice_recording_bottom_sheet.dart';
 import '../../widgets/message_shimmer_widget.dart';
+import 'file_preview_screen.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ChatModel? chat;
@@ -791,6 +792,21 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
 
     if (pickedFile == null) return;
+
+    // Show preview before sending
+    if (!mounted) return;
+    final confirmed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FilePreviewScreen(
+          filePath: pickedFile.path,
+          fileName: pickedFile.name,
+          fileType: FilePreviewType.photo,
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+
     _sendPickedImage(pickedFile);
   }
 
@@ -807,6 +823,20 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
 
     if (pickedFile == null) return;
+
+    // Show preview before sending
+    if (!mounted) return;
+    final confirmed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FilePreviewScreen(
+          filePath: pickedFile.path,
+          fileName: pickedFile.name,
+          fileType: FilePreviewType.video,
+        ),
+      ),
+    );
+    if (confirmed != true) return;
 
     final now = DateTime.now();
     final timeString = _formatFullTime(now);
@@ -933,6 +963,20 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       if (result == null || result.files.isEmpty) return;
       final file = result.files.first;
       if (file.path == null) return;
+
+      // Show preview before sending
+      if (!mounted) return;
+      final confirmed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FilePreviewScreen(
+            filePath: file.path!,
+            fileName: file.name,
+            fileType: FilePreviewType.document,
+          ),
+        ),
+      );
+      if (confirmed != true) return;
 
       final now = DateTime.now();
       final timeString = _formatFullTime(now);
@@ -1091,6 +1135,20 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
 
     if (pickedFile == null) return;
+
+    // Show preview before sending
+    if (!mounted) return;
+    final confirmed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FilePreviewScreen(
+          filePath: pickedFile.path,
+          fileName: pickedFile.name,
+          fileType: FilePreviewType.photo,
+        ),
+      ),
+    );
+    if (confirmed != true) return;
 
     final now = DateTime.now();
     final timeString = _formatFullTime(now);
@@ -2221,15 +2279,6 @@ if (!response.isError) {
         // Normal chat bubble with swipe-to-reply + long-press selection
         final isSelected = _selectedMessageIndices.contains(messageIndex);
 
-        if (message.messageType == MessageType.video) {
-          return Column(
-            children: [
-              if (dateSeparator != null) dateSeparator,
-              _buildVideoBubble(message, isDark),
-            ],
-          );
-        }
-
         return Column(
           children: [
             if (dateSeparator != null) dateSeparator,
@@ -2316,93 +2365,6 @@ if (!response.isError) {
       ),
     );
   }
-
-  Widget _buildVideoBubble(Message message, bool isDark) {
-    final isMe = message.isMe;
-    
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.65,
-        ),
-        decoration: BoxDecoration(
-          color: isMe
-              ? Colors.blue
-              : (isDark ? const Color(0xFF1F2C34) : Colors.white),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(12),
-            topRight: const Radius.circular(12),
-            bottomLeft: isMe
-                ? const Radius.circular(12)
-                : const Radius.circular(2),
-            bottomRight: isMe
-                ? const Radius.circular(2)
-                : const Radius.circular(12),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 3,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            // Video player widget
-            ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-              child: message.videoUrl != null
-                  ? _VideoPlayerWidget(videoUrl: message.videoUrl!)
-                  : Container(
-                      height: 180,
-                      width: double.infinity,
-                      color: Colors.black,
-                      child: const Center(
-                        child: Icon(Icons.videocam_off,
-                            color: Colors.white54, size: 40),
-                      ),
-                    ),
-            ),
-            // Timestamp
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    message.time,
-                    style: TextStyle(
-                      color: isMe
-                          ? Colors.white70
-                          : (isDark
-                              ? Colors.grey[500]
-                              : Colors.grey[600]),
-                      fontSize: 11,
-                    ),
-                  ),
-                  if (isMe) ...[
-                    const SizedBox(width: 4),
-                    _getStatusIcon(message.status),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-
 
   /// Check if we should show a date separator between two messages
   bool _shouldShowDateSeparator(Message prev, Message current) {

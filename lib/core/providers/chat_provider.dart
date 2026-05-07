@@ -28,7 +28,7 @@ class ChatProvider with ChangeNotifier {
   String? _filterChatType;
   
   // New Advanced Filters
-  String? _filterAccount;
+  List<String> _filterAccountIds = [];
   String? _filterContact;
   String? _filterLink;
   String? _filterGroup;
@@ -63,7 +63,7 @@ class ChatProvider with ChangeNotifier {
   String? get filterChannel => _filterChannel;
   String? get filterChatType => _filterChatType;
   
-  String? get filterAccount => _filterAccount;
+  List<String> get filterAccountIds => _filterAccountIds;
   String? get filterContact => _filterContact;
   String? get filterLink => _filterLink;
   String? get filterGroup => _filterGroup;
@@ -94,7 +94,7 @@ class ChatProvider with ChangeNotifier {
     String? readStatus,
     String? channel,
     String? chatType,
-    String? account,
+    List<String>? accountIds,
     String? contact,
     String? link,
     String? group,
@@ -108,7 +108,7 @@ class ChatProvider with ChangeNotifier {
     _filterReadStatus = readStatus;
     _filterChannel = channel;
     _filterChatType = chatType;
-    _filterAccount = account;
+    _filterAccountIds = accountIds ?? [];
     _filterContact = contact;
     _filterLink = link;
     _filterGroup = group;
@@ -126,7 +126,7 @@ class ChatProvider with ChangeNotifier {
     _filterReadStatus = null;
     _filterChannel = null;
     _filterChatType = null;
-    _filterAccount = null;
+    _filterAccountIds = [];
     _filterContact = null;
     _filterLink = null;
     _filterGroup = null;
@@ -176,6 +176,7 @@ class ChatProvider with ChangeNotifier {
         statusCode: statusCode,
         skip: 0,
         take: _pageSize,
+        accountIds: _filterAccountIds.isNotEmpty ? _filterAccountIds.join(',') : null,
       );
 
       if (!response.isError && response.data != null) {
@@ -320,6 +321,7 @@ class ChatProvider with ChangeNotifier {
         statusCode: statusCode,
         skip: 0,
         take: _pageSize,
+        accountIds: _filterAccountIds.isNotEmpty ? _filterAccountIds.join(',') : null,
       );
 
       if (!response.isError && response.data != null) {
@@ -436,6 +438,7 @@ class ChatProvider with ChangeNotifier {
         statusCode: statusCode,
         skip: _currentSkip,
         take: _pageSize,
+        accountIds: _filterAccountIds.isNotEmpty ? _filterAccountIds.join(',') : null,
       );
 
       if (!response.isError && response.data != null) {
@@ -639,9 +642,7 @@ class ChatProvider with ChangeNotifier {
       final isGroup = _filterChatType == 'Group';
       filtered = filtered.where((c) => c.isGroup == isGroup).toList();
     }
-    if (_filterAccount != null && _filterAccount != '--select--') {
-      filtered = filtered.where((c) => c.channelName.toLowerCase().contains(_filterAccount!.toLowerCase())).toList();
-    }
+    // Removed local filter for _filterAccount since it's handled via API using ChAccId now.
     if (_filterContact != null && _filterContact != '--select--') {
       filtered = filtered.where((c) => c.sender.toLowerCase().contains(_filterContact!.toLowerCase())).toList();
     }

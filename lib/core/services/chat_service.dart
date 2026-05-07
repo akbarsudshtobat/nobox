@@ -412,7 +412,7 @@ class ChatService {
   /// Fetch list of chat rooms filtered by status.
   /// [statusCode] → 1: Unassigned, 2: Assigned, 3: Resolved, null: All
   /// [skip] and [take] control pagination (defaults: skip=0, take=20)
-  Future<ApiResponse<List<Conversation>>> getConversations({int? statusCode, int skip = 0, int take = 20}) async {
+  Future<ApiResponse<List<Conversation>>> getConversations({int? statusCode, int skip = 0, int take = 20, String? accountIds}) async {
     try {
       final Map<String, dynamic> payload = {
         "Take": take,
@@ -427,9 +427,15 @@ class ChatService {
         "ColumnSelection": 1,
       };
 
-      // Apply EqualityFilter only when a specific status is requested
-      if (statusCode != null) {
-        payload["EqualityFilter"] = {"St": [statusCode]};
+      // Apply EqualityFilter for status and accountIds
+      if (statusCode != null || (accountIds != null && accountIds.isNotEmpty)) {
+        payload["EqualityFilter"] = {};
+        if (statusCode != null) {
+          payload["EqualityFilter"]["St"] = [statusCode];
+        }
+        if (accountIds != null && accountIds.isNotEmpty) {
+          payload["EqualityFilter"]["ChAccId"] = accountIds;
+        }
       }
 
       debugPrint('ChatService: fetchConversations statusCode=$statusCode');

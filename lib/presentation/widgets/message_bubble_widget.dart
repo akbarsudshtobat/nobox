@@ -484,7 +484,14 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
         _isLocationMessage(widget.message.content)) {
       return _buildLocationMessage(isMe, isDarkMode);
     }
-    if (widget.message.content.contains('🎥 Video') || widget.message.content.contains('📹 Video')) {
+
+    // Video detection: check content text, messageType, AND URL extension
+    if (widget.message.content.contains('🎥 Video') ||
+        widget.message.content.contains('📹 Video') ||
+        widget.message.content.contains('🎬 Video') ||
+        widget.message.messageType == MessageType.video ||
+        _hasVideoUrl(widget.message)) {
+       debugPrint('🎬 ROUTE→VIDEO: id=${widget.message.id}, type=${widget.message.messageType}, content="${widget.message.content}", imageUrl=${widget.message.imageUrl}, videoUrl=${widget.message.videoUrl}');
        return _buildVideoMessage(context, isMe, isDarkMode);
     }
 
@@ -498,6 +505,15 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
       default:
         return _buildTextMessage(isMe, isDarkMode);
     }
+  }
+
+  /// Check if the message has a video file URL (by extension), even if
+  /// messageType was misdetected as image by the server.
+  bool _hasVideoUrl(Message msg) {
+    final url = (msg.imageUrl ?? msg.videoUrl ?? '').toLowerCase();
+    if (url.isEmpty) return false;
+    const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.3gp', '.webm'];
+    return videoExts.any((ext) => url.contains(ext));
   }
 
   Widget _buildTextMessage(bool isMe, bool isDarkMode) {
@@ -732,10 +748,17 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
   }
 
   Widget _buildVideoMessage(BuildContext context, bool isMe, bool isDarkMode) {
-    final videoUrl = widget.message.imageUrl ?? '';
-    final caption = widget.message.content.replaceAll('📹 Video', '').trim();
+    // Read from both imageUrl (locally sent) and videoUrl (server received)
+    final videoUrl = widget.message.imageUrl ?? widget.message.videoUrl ?? '';
+    final caption = widget.message.content
+        .replaceAll('📹 Video', '')
+        .replaceAll('🎥 Video', '')
+        .replaceAll('🎬 Video', '')
+        .trim();
     final hasCaption = caption.isNotEmpty;
     final maxWidth = MediaQuery.of(context).size.width * 0.7;
+    final fixedHeight = maxWidth * 9 / 16; // Enforce 16:9 ratio
+    debugPrint('🎬 BUILD_VIDEO: videoUrl=$videoUrl, maxWidth=$maxWidth, fixedHeight=$fixedHeight');
 
     return Column(
       crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
@@ -755,63 +778,106 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
           },
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: maxWidth,
-                maxHeight: 200,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                     Container(
-                        color: Colors.grey.shade800,
-                        child: const Icon(
-                                Icons.videocam,
-                                size: 48,
-                                color: Colors.white54,
-                              ),
-                      ),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            Colors.black.withOpacity(0.3),
-                          ],
-                        ),
+            child: SizedBox(
+              width: maxWidth,
+              height: fixedHeight,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Dark placeholder background (no expensive thumbnail generation)
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.grey.shade800,
+                          Colors.grey.shade900,
+                        ],
                       ),
                     ),
-                    Center(
-                      child: Container(
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
+                  ),
+                  // Gradient overlay
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.transparent,
+                          Colors.black.withOpacity(0.6),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Center play button
+                  Center(
+                    child: Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Padding(
+                        padding: EdgeInsets.only(left: 4),
+                        child: Icon(
                           Icons.play_arrow,
-                          size: 36,
+                          size: 32,
                           color: Colors.white,
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  // 'Tap to play' pill — bottom left
+                  Positioned(
+                    left: 10,
+                    bottom: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Text(
+                        'Tap to play',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 'Video' pill — bottom right
+                  Positioned(
+                    right: 10,
+                    bottom: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.videocam, color: Colors.white, size: 14),
+                          SizedBox(width: 4),
+                          Text(
+                            'Video',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1115,6 +1181,85 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
       icon,
       size: 14,
       color: color,
+    );
+  }
+}
+
+class _VideoThumbnailWidget extends StatefulWidget {
+  final String videoUrl;
+  const _VideoThumbnailWidget({required this.videoUrl});
+
+  @override
+  State<_VideoThumbnailWidget> createState() => _VideoThumbnailWidgetState();
+}
+
+class _VideoThumbnailWidgetState extends State<_VideoThumbnailWidget> {
+  Uint8List? _thumbnailData;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _generateThumbnail();
+  }
+
+  Future<void> _generateThumbnail() async {
+    try {
+      final uint8list = await VideoThumbnail.thumbnailData(
+        video: widget.videoUrl,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 512,
+        quality: 75,
+      );
+      if (mounted) {
+        setState(() {
+          _thumbnailData = uint8list;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error generating video thumbnail: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Container(
+        color: Colors.grey.shade800,
+        child: const Center(
+          child: CircularProgressIndicator(
+            color: Colors.white54,
+            strokeWidth: 2,
+          ),
+        ),
+      );
+    }
+    
+    if (_thumbnailData != null) {
+      return Image.memory(
+        _thumbnailData!,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+      );
+    }
+    
+    // Fallback if thumbnail generation fails
+    return Container(
+      color: Colors.grey.shade800,
+      child: const Center(
+        child: Icon(
+          Icons.broken_image,
+          size: 48,
+          color: Colors.white54,
+        ),
+      ),
     );
   }
 }
