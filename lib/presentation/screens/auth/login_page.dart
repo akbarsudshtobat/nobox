@@ -88,24 +88,6 @@ class _LoginPageState extends State<LoginPage> {
       body: SafeArea(
         child: Stack(
           children: [
-            // Theme Toggle at Top Right
-            Positioned(
-              top: 10,
-              right: 10,
-              child: Consumer<ThemeProvider>(
-                builder: (_, themeProvider, __) {
-                  return IconButton(
-                    iconSize: 28,
-                    onPressed: () => themeProvider.toggleTheme(!isDark),
-                    icon: Icon(
-                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                      color: isDark ? Colors.white70 : Colors.black54,
-                    ),
-                  );
-                },
-              ),
-            ),
-            
             // Main Content
             Center(
               child: SingleChildScrollView(
@@ -136,7 +118,7 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 24),
                       // App Branding
                       Text(
-                        'NoBoxChat',
+                        'NoBox Chat',
                         style: theme.textTheme.headlineLarge?.copyWith(
                           fontWeight: FontWeight.w900,
                           letterSpacing: -1.2,
@@ -258,7 +240,7 @@ class _LoginPageState extends State<LoginPage> {
                       
                       // Footer
                       Text(
-                        'Powered by Nobox',
+                        'By NoBox.Ai',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: isDark ? Colors.white30 : Colors.black26,
                           letterSpacing: 0.8,
@@ -269,6 +251,25 @@ class _LoginPageState extends State<LoginPage> {
                     ],
                   ),
                 ),
+              ),
+            ),
+
+            // Theme Toggle at Top Right (on top of content so it receives taps)
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Consumer<ThemeProvider>(
+                builder: (_, themeProvider, __) {
+                  final providerIsDark = themeProvider.isDarkMode;
+                  return IconButton(
+                    iconSize: 28,
+                    onPressed: () => themeProvider.toggleTheme(!providerIsDark),
+                    icon: Icon(
+                      providerIsDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                      color: providerIsDark ? Colors.white70 : Colors.black54,
+                    ),
+                  );
+                },
               ),
             ),
           ],

@@ -102,7 +102,7 @@ class _SplashPageState extends State<SplashPage> {
               const SizedBox(height: 10),
               // App Name
               const Text(
-                'NoBoxChat',
+                'NoBox Chat',
                 style: TextStyle(
                   fontSize: 42,
                   fontWeight: FontWeight.w900,
@@ -113,7 +113,7 @@ class _SplashPageState extends State<SplashPage> {
               const SizedBox(height: 12),
               // Subtitle
               const Text(
-                'Professional Chat Management',
+                'Ai Powered Chatbot',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,

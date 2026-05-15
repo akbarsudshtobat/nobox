@@ -258,7 +258,13 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
                     if (value == 'archived') {
                       Navigator.pushNamed(context, AppRoutes.archivedChats);
                     } else if (value == 'dark_mode') {
-                      themeProvider.toggleTheme(!isDark);
+                      // Delay theme toggle to next frame so the popup menu
+                      // fully closes before the widget tree rebuilds.
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          themeProvider.toggleTheme(!isDark);
+                        }
+                      });
                     } else if (value == 'logout') {
                       _showLogoutDialog();
                     }

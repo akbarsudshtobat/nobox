@@ -778,8 +778,8 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
     if (caption == '📷 Photo') caption = '';
     
     final hasCaption = caption.isNotEmpty;
-    final maxW = 180.0;
-    final maxH = 180.0;
+    final maxW = MediaQuery.of(context).size.width * 0.65; // 65% lebar layar
+    final maxH = 280.0; // tinggi maksimal 280px
 
     if (imageUrl == null || imageUrl.isEmpty) {
       return Column(
