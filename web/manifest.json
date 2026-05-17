@@ -1,6 +1,6 @@
 {
-    "name": "nobox_chat_basic",
-    "short_name": "nobox_chat_basic",
+    "name": "NoBox Chat",
+    "short_name": "NoBox Chat",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
