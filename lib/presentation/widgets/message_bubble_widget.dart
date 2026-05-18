@@ -501,7 +501,6 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
         widget.message.content.contains('🎬 Video') ||
         widget.message.messageType == MessageType.video ||
         _hasVideoUrl(widget.message)) {
-       debugPrint('🎬 ROUTE→VIDEO: id=${widget.message.id}, type=${widget.message.messageType}, content="${widget.message.content}", imageUrl=${widget.message.imageUrl}, videoUrl=${widget.message.videoUrl}');
        return _buildVideoMessage(context, isMe, isDarkMode);
     }
 
@@ -915,7 +914,7 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
     final hasCaption = caption.isNotEmpty;
     final maxWidth = MediaQuery.of(context).size.width * 0.7;
     final fixedHeight = maxWidth * 9 / 16; // Enforce 16:9 ratio
-    debugPrint('🎬 BUILD_VIDEO: videoUrl=$videoUrl, maxWidth=$maxWidth, fixedHeight=$fixedHeight');
+
 
     return Column(
       crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
