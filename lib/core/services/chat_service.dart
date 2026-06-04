@@ -868,6 +868,44 @@ class ChatService {
     }
   }
 
+  Future<String?> _getExtId(String? contactId) async {
+    if (contactId == null || contactId.isEmpty) return null;
+    try {
+      final response = await _apiClient.get(
+        'https://id.nobox.ai/Services/Chat/Chatlinkcontacts/Retrieve?Id=$contactId',
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map) {
+          final entity = data['Entity'];
+          if (entity is Map) {
+            // Mentor contract: ExtId must come from Entity.Extra.ExtId ("628...")
+            final extraRaw = entity['Extra'];
+            if (extraRaw != null) {
+              try {
+                final extraMap = extraRaw is String ? jsonDecode(extraRaw) : extraRaw;
+                if (extraMap is Map && extraMap['ExtId'] != null) {
+                  return extraMap['ExtId'].toString();
+                }
+              } catch (_) {
+                // ignore parse error, fallback to IdExt below
+              }
+            }
+            return entity['IdExt']?.toString();
+          }
+
+          // fallback if API shape differs
+          if (data['IdExt'] != null) return data['IdExt']?.toString();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error retrieving ExtId: $e');
+    }
+    return null;
+  }
+
+
   Future<ApiResponse<bool>> sendMessage(MessageRequest request) async {
     try {
       final roomIdStr = request.receiver;
@@ -888,14 +926,55 @@ class ChatService {
       }
       safeAccountId = safeAccountId.replaceAll('[', '').replaceAll(']', '').replaceAll('"', '').trim();
 
-      final payload = {
+      // Retrieve ExtId via POST to Chatlinkcontacts/Retrieve
+      final retrieveResponse = await _apiClient.post(
+        'Services/Chat/Chatlinkcontacts/Retrieve',
+        data: {'EntityId': request.contactId},
+      );
+      String extId = '';
+      if (retrieveResponse.statusCode == 200) {
+        final data = retrieveResponse.data;
+        // Mentor contract: ExtId should come from Entity.Extra.ExtId ("628...")
+        final entity = data['Entity'];
+        if (entity is Map) {
+          final extraRaw = entity['Extra'];
+          if (extraRaw != null) {
+            try {
+              final extraMap = extraRaw is String ? jsonDecode(extraRaw) : extraRaw;
+              if (extraMap is Map && extraMap['ExtId'] != null) {
+                extId = extraMap['ExtId']?.toString() ?? '';
+              }
+            } catch (_) {
+              // ignore parse error; fallback to IdExt
+            }
+          }
+          extId = (extId.isNotEmpty ? extId : (entity['IdExt']?.toString() ?? ''));
+        }
+        debugPrint('ChatService: ExtId retrieved = $extId');
+      }
+
+
+      final int channelId = int.tryParse(request.channelId ?? '1') ?? 1;
+
+      // Telegram (ChannelId=2) backend expects LinkId (long) in addition to ExtId (string)
+      // to avoid error like: 'long' does not contain a definition for 'ExtId'.
+      final Map<String, dynamic> payload = {
         'Body': content,
-        'BodyType': (request.attachment != null && request.attachment!.isNotEmpty) ? 2 : 1, 
-        'IdExternal': request.contactId ?? '',
-        'ChannelId': int.tryParse(request.channelId ?? '1') ?? 1,
+        'BodyType': 1,
+        'ExtId': extId,
+        'ChannelId': channelId,
         'AccountIds': safeAccountId,
         'Attachment': request.attachment ?? '',
       };
+
+      if (channelId == 2) {
+        final linkId = int.tryParse(request.contactId ?? '');
+
+        if (linkId != null) {
+          payload['LinkId'] = linkId;
+        }
+      }
+
 
       final response = await _apiClient.post(
       'https://id.nobox.ai/Inbox/Send?Id=${roomIdStr ?? '0'}',
@@ -1111,9 +1190,11 @@ class ChatService {
     }
     safeAccountId = safeAccountId.replaceAll('[', '').replaceAll(']', '').replaceAll('"', '').trim();
 
+    final extId = await _getExtId(contactId);
     final payload = {
       "Body": "", 
       "BodyType": bodyType,
+      "ExtId": extId ?? "",
       "ChannelId": int.tryParse(channelId ?? '1') ?? 1,
       "AccountIds": safeAccountId,
       "Attachment": attachmentData,
