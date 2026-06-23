@@ -242,8 +242,10 @@ class ChatService {
   Future<ApiResponse<List<Map<String, dynamic>>>> getAgents() async {
     try {
       final requestData = {
-        'IncludeColumns': ['Id', 'UserId', 'DisplayName', 'Username', 'Name', 'Nm'],
-        'ColumnSelection': 1,
+        'EqualityFilter': {
+          'Roles': [6]
+        },
+        'IncludeColumns': ['DisplayName', 'UserId'],
         'Take': 100,
         'Skip': 0,
       };
@@ -488,7 +490,7 @@ class ChatService {
         }
 
         if (contactId != null && contactId.isNotEmpty) {
-          payload["EqualityFilter"]["CtId"] = contactId;
+          payload["EqualityFilter"]["CtRealId"] = [contactId];
         }
 
         if (linkId != null && linkId.isNotEmpty) {
@@ -516,9 +518,12 @@ class ChatService {
           payload["EqualityFilter"]["TagsIds"] = tagsId;
         }
 
-        if (humanAgentId != null && humanAgentId.isNotEmpty) {
-          // filter by assigned/human agent (from Chatrooms/List response: AgentId / AssignedAgentName)
-          payload["EqualityFilter"]["AgentId"] = humanAgentId;
+      }
+
+      if (humanAgentId != null && humanAgentId.isNotEmpty) {
+        final int? parsedId = int.tryParse(humanAgentId);
+        if (parsedId != null) {
+          payload["UserIds"] = [parsedId];
         }
       }
 

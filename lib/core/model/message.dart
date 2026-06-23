@@ -22,6 +22,7 @@ class ChatModel {
   final String funnel;
   final String notes;
   final String channelName;
+  final String channelType;
   final String chId;
   final String accountId;
   final String ctRealId;
@@ -52,6 +53,7 @@ class ChatModel {
     this.funnel = '',
     this.notes = '',
     this.channelName = '',
+    this.channelType = '',
     this.chId = '',
     this.accountId = '',
     this.ctRealId = '',
@@ -83,6 +85,7 @@ class ChatModel {
     String? funnel,
     String? notes,
     String? channelName,
+    String? channelType,
     String? chId,
     String? accountId,
     String? ctRealId,
@@ -113,6 +116,7 @@ class ChatModel {
       funnel: funnel ?? this.funnel,
       notes: notes ?? this.notes,
       channelName: channelName ?? this.channelName,
+      channelType: channelType ?? this.channelType,
       chId: chId ?? this.chId,
       accountId: accountId ?? this.accountId,
       ctRealId: ctRealId ?? this.ctRealId,

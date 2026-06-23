@@ -10,7 +10,7 @@ class HumanAgentItem extends FilterDataItem {
   
   factory HumanAgentItem.fromJson(Map<String, dynamic> json) {
     return HumanAgentItem(
-      id: json['Id']?.toString() ?? json['UserId']?.toString() ?? '',
+      id: json['UserId']?.toString() ?? json['Id']?.toString() ?? '',
       name: json['DisplayName']?.toString() ?? json['Name']?.toString() ?? json['Nm']?.toString() ?? '',
     );
   }

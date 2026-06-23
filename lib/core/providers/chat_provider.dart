@@ -256,23 +256,27 @@ class ChatProvider with ChangeNotifier {
         getTags(),
         getCachedAgents(),
         getCachedLinks(),
+        getCachedAccounts(), // FIX: Fetch accounts untuk resolusi channel type (ChId → Code)
       ]);
 
       // Determine which status to request from the server
       final statusCode = _statusCodeForFilter(_activeFilter);
       // ── Jalur 1: Server-Side Filters (dikirim via EqualityFilter) ──────────
-      // Hanya Account, Contact, Group, Campaign, Deal yang aman dikirim ke backend.
-      // Link, Funnel, Tag, HumanAgent di-filter client-side untuk hindari Error 500.
+      // Account, Contact, Group, Campaign, Deal, HumanAgent → server-side aman
+      // MuteAi, Channel, ChatType, ReadStatus, Link, Funnel, Tag → client-side (Jalur 2)
+      // NOTE: LinkTmp sebagai EqualityFilter = HTTP 500 (tidak didukung server)
       final response = await _chatService.getConversations(
         statusCode: statusCode,
         skip: 0,
         take: _pageSize,
         accountIds: _filterAccountIds.isNotEmpty ? _filterAccountIds.join(',') : null,
-        contactId: _filterContact,   // CtId → server-side aman
-        groupId: _filterGroup,       // GrpId → server-side aman
-        campaignId: _filterCampaign, // CampaignId → server-side aman
-        dealId: _filterDeal,         // DealId → server-side aman
-        // linkId, funnelId, tagsId, humanAgentId → Jalur 2, client-side di `chats` getter
+        contactId: _filterContact,        // CtRealId → server-side
+        groupId: _filterGroup,            // GrpId → server-side aman
+        campaignId: _filterCampaign,      // CampaignId → server-side aman
+        dealId: _filterDeal,              // DealId → server-side aman
+        humanAgentId: _filterHumanAgent,
+        // linkId → TIDAK bisa: EqualityFilter LinkTmp = HTTP 500
+        // funnelId, tagsId → client-side
       );
 
       if (!response.isError && response.data != null) {
@@ -283,6 +287,15 @@ class ChatProvider with ChangeNotifier {
 
         _chats = freshData.map((c) {
           var chat = c.toChatModel();
+
+          // FIX: Resolve channelType dari ChId menggunakan account cache
+          // Contoh: ChId='1' → 'WhatsApp', ChId='2' → 'Telegram'
+          if (chat.channelType.isEmpty && chat.chId.isNotEmpty) {
+            final resolvedCode = _resolveChannelCode(chat.chId);
+            if (resolvedCode.isNotEmpty) {
+              chat = chat.copyWith(channelType: resolvedCode);
+            }
+          }
 
           // Apply locally cached mapping for tags and funnel
           chat = _applyTagAndFunnelMapping(chat, c);
@@ -392,7 +405,8 @@ class ChatProvider with ChangeNotifier {
         groupId: _filterGroup,
         campaignId: _filterCampaign,
         dealId: _filterDeal,
-        // linkId, funnelId, tagsId, humanAgentId → client-side di `chats` getter
+        humanAgentId: _filterHumanAgent,
+        // linkId → HTTP 500, funnelId, tagsId → client-side
       );
 
       if (!response.isError && response.data != null) {
@@ -402,6 +416,14 @@ class ChatProvider with ChangeNotifier {
         // Update existing chats yang datanya berubah
         for (final conv in freshData) {
           var chat = conv.toChatModel();
+
+          // FIX: Resolve channelType dari ChId menggunakan account cache
+          if (chat.channelType.isEmpty && chat.chId.isNotEmpty) {
+            final resolvedCode = _resolveChannelCode(chat.chId);
+            if (resolvedCode.isNotEmpty) {
+              chat = chat.copyWith(channelType: resolvedCode);
+            }
+          }
 
           // Apply locally cached mapping for tags and funnel
           chat = _applyTagAndFunnelMapping(chat, conv);
@@ -425,6 +447,14 @@ class ChatProvider with ChangeNotifier {
             .map((c) {
               var chat = c.toChatModel();
 
+              // FIX: Resolve channelType dari ChId menggunakan account cache
+              if (chat.channelType.isEmpty && chat.chId.isNotEmpty) {
+                final resolvedCode = _resolveChannelCode(chat.chId);
+                if (resolvedCode.isNotEmpty) {
+                  chat = chat.copyWith(channelType: resolvedCode);
+                }
+              }
+
               // Apply locally cached mapping for tags and funnel
               chat = _applyTagAndFunnelMapping(chat, c);
 
@@ -434,6 +464,7 @@ class ChatProvider with ChangeNotifier {
                 unreadCount: _readIds.contains(chat.id) ? 0 : chat.unreadCount,
               );
             }).toList();
+
 
         if (newChats.isNotEmpty) {
           _chats.insertAll(0, newChats);
@@ -467,7 +498,8 @@ class ChatProvider with ChangeNotifier {
         groupId: _filterGroup,
         campaignId: _filterCampaign,
         dealId: _filterDeal,
-        // linkId, funnelId, tagsId, humanAgentId → client-side di `chats` getter
+        humanAgentId: _filterHumanAgent,
+        // linkId → HTTP 500, funnelId, tagsId → client-side
       );
 
       if (!response.isError && response.data != null) {
@@ -650,13 +682,22 @@ class ChatProvider with ChangeNotifier {
 
     // ReadStatus — client-side only (backend tidak support filter ini)
     if (_filterReadStatus != null && _filterReadStatus != '--select--') {
-      final isRead = _filterReadStatus == 'Read';
+      final isRead = _filterReadStatus == 'Is Read'; // FIX: String dari UI adalah 'Is Read', bukan 'Read'
       filtered = filtered.where((c) => isRead ? c.unreadCount == 0 : c.unreadCount > 0).toList();
     }
 
-    // Channel — client-side (berdasarkan nama account/channel)
+    // Channel — client-side (berdasarkan Code dari account list, misal: 'WhatsApp', 'Telegram')
+    // _filterChannel berisi string seperti 'WhatsApp' yang dibandingkan dengan channelType
+    // channelType sudah di-resolve dari ChId → Code di saat fetch data.
     if (_filterChannel != null && _filterChannel != '--select--') {
-      filtered = filtered.where((c) => c.channelName.toLowerCase().contains(_filterChannel!.toLowerCase())).toList();
+      filtered = filtered.where((c) {
+        // Primary: bandingkan dengan channelType (sudah di-resolve dari account Code)
+        if (c.channelType.isNotEmpty) {
+          return c.channelType.toLowerCase().contains(_filterChannel!.toLowerCase());
+        }
+        // Fallback: bandingkan channelName (nama akun) jika channelType kosong
+        return c.channelName.toLowerCase().contains(_filterChannel!.toLowerCase());
+      }).toList();
     }
 
     // ChatType — client-side only (backend tidak support IsGrp filter via EqualityFilter)
@@ -665,18 +706,29 @@ class ChatProvider with ChangeNotifier {
       filtered = filtered.where((c) => c.isGroup == isGroup).toList();
     }
 
+    // Contact — FIX: Jalur 1 server-side mengirim CtId ke EqualityFilter.
+    // Namun ContactItem.id = Entity Id dari /Nobox/Contact/List yang sama dengan CtRealId chatroom.
+    // Tambahkan client-side fallback: cocokkan c.ctRealId (Entity Id) dengan _filterContact.
+    if (_filterContact != null && _filterContact!.isNotEmpty) {
+      filtered = filtered.where((c) =>
+        c.ctRealId == _filterContact ||
+        c.contactId == _filterContact  // fallback jika server-side tidak filter sempurna
+      ).toList();
+    }
+
     // ── Jalur 2: Filters berikut di-remove dari payload API ─────────────────
 
-    // Link — client-side only (mengirim LinkTmp ke backend menyebabkan Error 500)
-    // _filterLink menyimpan ID link → resolve ke nama untuk dibandingkan dengan chat.link
+    // Link — CLIENT-SIDE ONLY
+    // KONFIRMASI LOG: Chatlinkcontacts.Id = Chatroom.CtId
+    // Contoh: Chatlinkcontacts {Id:814657018602245, Name:"Senikersku"}
+    //         Chatroom: {CtId:814657018602245, Ct:"Senikersku"}
+    // → filter: chat.contactId == _filterLink (membandingkan CtId)
+    // EqualityFilter LinkTmp = HTTP 500 (tidak didukung server)
     if (_filterLink != null && _filterLink != '--select--') {
-      final resolvedLinkName = _resolveLinkName(_filterLink!);
-      if (resolvedLinkName != null && resolvedLinkName.isNotEmpty) {
-        filtered = filtered.where((c) => c.link.toLowerCase() == resolvedLinkName.toLowerCase()).toList();
-      } else {
-        // Fallback: bandingkan ID langsung (LinkTmp bisa tersimpan apa adanya di chat.link)
-        filtered = filtered.where((c) => c.link.toLowerCase().contains(_filterLink!.toLowerCase())).toList();
-      }
+      filtered = filtered.where((c) =>
+        c.contactId == _filterLink!
+      ).toList();
+      debugPrint('[Link Filter] filterLink=$_filterLink, hasil=${filtered.length}');
     }
 
     // Funnel — client-side only (mengirim FunnelId ke backend menyebabkan Error 500)
@@ -703,17 +755,6 @@ class ChatProvider with ChangeNotifier {
       }
     }
 
-    // HumanAgent — client-side only (mengirim AgentId ke backend menyebabkan Error 500)
-    // _filterHumanAgent menyimpan ID agent → resolve ke nama untuk dibandingkan dengan chat.agentName
-    if (_filterHumanAgent != null && _filterHumanAgent != '--select--') {
-      final resolvedAgentName = _resolveAgentName(_filterHumanAgent!);
-      if (resolvedAgentName != null && resolvedAgentName.isNotEmpty) {
-        filtered = filtered.where((c) => c.agentName.toLowerCase().contains(resolvedAgentName.toLowerCase())).toList();
-      } else {
-        // Fallback: bandingkan ID langsung
-        filtered = filtered.where((c) => c.agentName.toLowerCase().contains(_filterHumanAgent!.toLowerCase())).toList();
-      }
-    }
 
     // Sort: Pinned first, then by last message time descending
     filtered.sort((a, b) {
@@ -1078,6 +1119,11 @@ class ChatProvider with ChangeNotifier {
   List<Map<String, dynamic>>? _cachedTags;
   List<Map<String, dynamic>>? _cachedAgents; // untuk client-side HumanAgent filter
   List<Map<String, dynamic>>? _cachedLinks;  // untuk client-side Link filter
+  List<Map<String, dynamic>>? _cachedAccounts; // untuk channel type resolution (ChId → Code)
+  
+  // Map dari ChId (string) ke Channel Code (misal: '1' → 'WhatsApp')
+  // Dibangun dari _cachedAccounts saat accounts di-fetch
+  Map<String, String> _chIdToChannelCode = {};
 
   Future<List<Map<String, dynamic>>?> getFunnels({bool forceRefresh = false}) async {
     if (_cachedFunnels != null && !forceRefresh) return _cachedFunnels;
@@ -1099,6 +1145,41 @@ class ChatProvider with ChangeNotifier {
     }
     _error = response.error;
     return null;
+  }
+
+  /// Fetch dan cache list of Accounts.
+  /// Membangun _chIdToChannelCode map untuk resolusi channel type.
+  Future<List<Map<String, dynamic>>?> getCachedAccounts({bool forceRefresh = false}) async {
+    if (_cachedAccounts != null && !forceRefresh) return _cachedAccounts;
+    final response = await _chatService.getAccounts();
+    if (!response.isError && response.data != null) {
+      _cachedAccounts = response.data;
+      // Build map: Channel (angka) → Code (nama platform)
+      // Contoh: {"1": "WhatsApp", "2": "Telegram", "1505": "TokopediaCom"}
+      _chIdToChannelCode = {};
+      for (final account in _cachedAccounts!) {
+        final channelNum = account['Channel']?.toString();
+        final code = account['Code']?.toString();
+        if (channelNum != null && channelNum.isNotEmpty && code != null && code.isNotEmpty) {
+          _chIdToChannelCode[channelNum] = code;
+        }
+        // Juga map dari account Id ke code (untuk jaga-jaga jika ChId = AccId)
+        final accId = account['Id']?.toString();
+        if (accId != null && accId.isNotEmpty && code != null && code.isNotEmpty) {
+          _chIdToChannelCode.putIfAbsent(accId, () => code);
+        }
+      }
+      debugPrint('ChatProvider: _chIdToChannelCode = $_chIdToChannelCode');
+      return _cachedAccounts;
+    }
+    debugPrint('ChatProvider: getCachedAccounts soft-fail: ${response.error}');
+    return null;
+  }
+
+  /// Resolves ChId → Channel Code menggunakan [_chIdToChannelCode].
+  /// Misal: '1' → 'WhatsApp', '2' → 'Telegram'
+  String _resolveChannelCode(String chId) {
+    return _chIdToChannelCode[chId] ?? '';
   }
 
   /// Fetch dan cache list of Agents.

@@ -41,7 +41,7 @@ class AppConfig {
   static const String toggleNeedReplyEndpoint = 'Services/Nobox/Contact/ToggleNeedReply';
 
   // Agent Endpoints
-  static const String getAgentsEndpoint = 'Services/Administration/User/ListAgent';
+  static const String getAgentsEndpoint = 'Services/Administration/User/List';
   static const String addAgentToConversationEndpoint = 'Services/Chat/Chatrooms/AddAgentToConversation';
   static const String resolveConversationEndpoint = 'Services/Chat/Chatrooms/MarkResolved';
   static const String moveArchiveEndpoint = 'Services/Chat/Chatrooms/MoveArchive';

@@ -1,33 +1,23 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:io';
 
 void main() async {
-  final token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiYWtiYXJyaXlhbmRAZ21haWwuY29tIiwiaHR0cDovL3NjaGVtYXMueG1sc29hcC5vcmcvd3MvMjAwNS8wNS9pZGVudGl0eS9jbGFpbXMvbmFtZWlkZW50aWZpZXIiOiIxOTIwIiwiZXhwIjoxNzc5Nzg2NTE2LCJpc3MiOiJodHRwczovL2lkLm5vYm94LmFpLyIsImF1ZCI6Imh0dHBzOi8vaWQubm9ib3guYWkvIn0.IIrHiYRKsVmzJFPuCpohJJO8uk7xtqwukt_uaS2XEo8";
+  final token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiYWtiYXJyaXlhbmRAZ21haWwuY29tIiwiaHR0cDovL3NjaGVtYXMueG1sc29hcC5vcmcvd3MvMjAwNS8wNS9pZGVudGl0eS9jbGFpbXMvbmFtZWlkZW50aWZpZXIiOiIxOTIwIiwiZXhwIjoxNzgyMTMyNTE2LCJpc3MiOiJodHRwczovL2lkLm5vYm94LmFpLyIsImF1ZCI6Imh0dHBzOi8vaWQubm9ib3guYWkvIn0.YcPaN7aaBtSbLUYM8Kn_jW6pcnWxtupcA4TXQ3EwP78';
+  final url = Uri.parse('https://id.nobox.ai/Services/Administration/User/ListAgent');
   
-  final Map<String, dynamic> bodyBoth = {
-    "Body": "hello from test both",
-    "BodyType": 1,
-    "LinkId": 807686061867013,
-    "ExtId": "6912143766",
-    "ChannelId": 2,
-    "AccountIds": "807236570021893",
-    "Attachment": ""
+  final payload = {
+    'IncludeColumns': ['Id', 'UserId', 'DisplayName', 'Username', 'Name', 'Nm'],
+    'ColumnSelection': 1,
+    'Take': 100,
+    'Skip': 0,
   };
-  
-  try {
-    print("Testing Inbox/Send with BOTH LinkId and ExtId...");
-    final res = await http.post(
-      Uri.parse('https://id.nobox.ai/Inbox/Send?Id=807686061948933'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json'
-      },
-      body: jsonEncode(bodyBoth),
-    );
-    print("Status: ${res.statusCode}");
-    print("Body: ${res.body}");
 
-  } catch (e) {
-    print("Error: $e");
-  }
+  print('Testing payload ListAgent');
+  final request = await HttpClient().postUrl(url);
+  request.headers.set('Authorization', 'Bearer $token');
+  request.headers.set('Content-Type', 'application/json');
+  request.write(jsonEncode(payload));
+  final response = await request.close();
+  final responseBody = await response.transform(utf8.decoder).join();
+  print('Response: $responseBody\n');
 }

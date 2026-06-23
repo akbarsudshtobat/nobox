@@ -1417,11 +1417,31 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
 
             // Extract lists gracefully into Models
             final channelsRaw = snapshot.data?[0] as ApiResponse<List<Map<String, dynamic>>>?;
-            final channels = channelsRaw?.data?.map((e) => e['Nm']?.toString() ?? e['Name']?.toString() ?? '').where((e) => e.isNotEmpty).toList() ?? [];
+            // FIXME: Jangan pakai Nm dari Master/Channel/List (misal: "SellerTokopedia.com")
+            // karena channelType disimpan sebagai Account.Code (misal: "TokopediaCom").
+            // Ambil opsi channel DARI Account list Code agar matching pasti benar.
 
             final accountsRaw = snapshot.data?[1] as ApiResponse<List<Map<String, dynamic>>>?;
-            final accounts = accountsRaw?.data?.map((e) => e['Name']?.toString() ?? '').where((e) => e.isNotEmpty).toList() ?? [];
             final accountList = accountsRaw?.data ?? [];
+
+            // Derive unique channel codes from account list (e.g., 'WhatsApp', 'Telegram', 'TokopediaCom')
+            // Also build a display name map: Code -> prettier name
+            final channelCodeToName = <String, String>{};
+            for (final acc in accountList) {
+              final code = acc['Code']?.toString() ?? '';
+              if (code.isEmpty) continue;
+              // Try to get a prettier name from Master/Channel/List via Kd matching
+              final masterMatch = channelsRaw?.data?.firstWhere(
+                (ch) => (ch['Kd']?.toString() ?? '') == code,
+                orElse: () => <String, dynamic>{},
+              );
+              final displayName = (masterMatch != null && masterMatch.isNotEmpty)
+                  ? (masterMatch['Nm']?.toString() ?? code)
+                  : code;
+              channelCodeToName[code] = displayName;
+            }
+            // channels list = unique codes (used as filter value)
+            final channels = channelCodeToName.keys.toList();
 
             final contactsRaw = snapshot.data?[2] as ApiResponse<List<Map<String, dynamic>>>?;
             final contacts = contactsRaw?.data?.map((e) => ContactItem.fromJson(e)).toList() ?? [];
@@ -1623,9 +1643,9 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
                                 buildDropdownRow('Read Status', selectedReadStatus, ['Is Read', 'Unread'], (val) {
                                   setDialogState(() => selectedReadStatus = val);
                                 }),
-                                buildDropdownRow('Channel', selectedChannel, channels.isEmpty ? ['WhatsApp', 'Telegram', 'Email', 'Web'] : channels, (val) {
+                                buildDropdownRow('Channel', selectedChannel, channels.isEmpty ? ['WhatsApp', 'Telegram', 'TikTok', 'Shopee', 'Tokopedia'] : channels, (val) {
                                   setDialogState(() => selectedChannel = val);
-                                }),
+                                }, itemAsString: (code) => channelCodeToName[code] ?? code),
                                 buildDropdownRow('Chat', selectedChat, ['Private', 'Group'], (val) {
                                   setDialogState(() => selectedChat = val);
                                 }),

@@ -14,6 +14,7 @@ class Conversation {
   final String? avatarUrl;
   final String? lastMessageType;
   final String channelName;
+  final String channelType;
   final bool isPinned;
   final String chId;
   final String funnel;
@@ -42,6 +43,7 @@ class Conversation {
     this.avatarUrl,
     this.lastMessageType,
     this.channelName = '',
+    this.channelType = '',
     this.isPinned = false,
     this.chId = '',
     this.funnel = '',
@@ -120,6 +122,7 @@ class Conversation {
       avatarUrl: _resolveAvatarUrl(json),
       lastMessageType: getValue(['LastMessageType', 'last_message_type']),
       channelName: _resolveChannelName(json),
+      channelType: getValue(['ChNm', 'ChannelName', 'chnm'])?.toString() ?? '',
       isPinned: json['IsPin'] == 2 || json['is_pinned'] == true,
       chId: getValue(['ChId', 'ch_id'])?.toString() ?? '',
       accountId: getValue(['AccId', 'acc_id', 'AccountId', 'accountId'])?.toString() ?? '',
@@ -164,6 +167,7 @@ class Conversation {
     String? avatarUrl,
     String? lastMessageType,
     String? channelName,
+    String? channelType,
     bool? isPinned,
     String? chId,
     String? funnel,
@@ -189,6 +193,7 @@ class Conversation {
       avatarUrl: avatarUrl ?? this.avatarUrl,
       lastMessageType: lastMessageType ?? this.lastMessageType,
       channelName: channelName ?? this.channelName,
+      channelType: channelType ?? this.channelType,
       isPinned: isPinned ?? this.isPinned,
       chId: chId ?? this.chId,
       funnel: funnel ?? this.funnel,
@@ -259,6 +264,7 @@ class Conversation {
       avatarUrl: avatarUrl,
       lastMessageType: lastMessageType,
       channelName: channelName,
+      channelType: channelType,
       isPinned: isPinned,
       chId: chId,
       funnel: funnel,
