@@ -372,12 +372,21 @@ class ChatProvider with ChangeNotifier {
       final isNeedReply = roomData['IsNeedReply'] == 1 || roomData['IsNeedReply'] == true;
       final sdrMsg = roomData['SdrMsg']?.toString() ?? '';
 
+      // FIX Bug #3: Also update isBlocked from CtIsBlock if present
+      final bool resolvedIsBlocked;
+      if (roomData.containsKey('CtIsBlock')) {
+        resolvedIsBlocked = roomData['CtIsBlock'] == 1 || roomData['CtIsBlock'] == true;
+      } else {
+        resolvedIsBlocked = existing.isBlocked;
+      }
+
       _chats[index] = existing.copyWith(
         lastMessage: lastMsg,
         unreadCount: uc,
         time: timeMsg,
         needReply: isNeedReply,
         isLastMessageFromMe: sdrMsg.toLowerCase() == 'you',
+        isBlocked: resolvedIsBlocked,
       );
 
       debugPrint('ChatProvider: 🏠 Updated room $roomId from SignalR | lastMsg=$lastMsg | uc=$uc');
@@ -823,7 +832,7 @@ class ChatProvider with ChangeNotifier {
       // Send to server via SignalR
       final success = await SignalRService().invokeBlockUnblock(
         roomId: roomId,
-        contactId: contactId,
+        contactId: _chats[index].ctRealId.isNotEmpty ? _chats[index].ctRealId : contactId,
         status: _chats[index].status == 'Resolved' ? 3 : (_chats[index].status == 'Assigned' ? 2 : 1),
         shouldBlock: isBlocked,
       );
@@ -837,6 +846,42 @@ class ChatProvider with ChangeNotifier {
       return true;
     }
     return false;
+  }
+
+  /// Sends a message via SignalR 'KirimPesan' instead of the REST API.
+  /// Used specifically for real-time channels like Telegram.
+  Future<bool> sendMessageViaSignalR({
+    required ChatModel chat,
+    required String type, // "1" for text, "3" for media
+    String? msg,
+    String? fileJson,
+  }) async {
+    final success = await SignalRService().invokeKirimPesan(
+      idLink: chat.link.isNotEmpty ? chat.link : chat.contactId, // link or contactId
+      idAccount: chat.accountId,
+      idRoom: chat.id,
+      idGroup: null, // As per payload screenshot
+      type: type,
+      msg: msg,
+      fileJson: fileJson,
+    );
+    return success;
+  }
+
+
+  /// Update block status from incoming SignalR TerimaBlockUnblock event.
+  /// Called from main.dart when server broadcasts a block/unblock change
+  /// (e.g. from web nobox.ai).
+  void updateBlockStatusFromSignalR(String roomId, bool isBlocked) {
+    final index = _chats.indexWhere((c) => c.id == roomId);
+    if (index >= 0) {
+      _chats[index] = _chats[index].copyWith(isBlocked: isBlocked);
+      debugPrint('ChatProvider: 🚫 Updated block status for room $roomId → isBlocked=$isBlocked');
+      notifyListeners();
+    } else {
+      debugPrint('ChatProvider: 🚫 Room $roomId not found for block update, triggering refresh');
+      refreshFirstPage();
+    }
   }
 
   Future<void> toggleArchive(String chatId) async {

@@ -1123,46 +1123,49 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Avatar ──
-              if (_selectedChats.isNotEmpty)
-                Container(
-                  width: 48,
-                  height: 48,
-                  alignment: Alignment.center,
-                  child: Icon(
-                    isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
-                    color: isSelected ? Colors.blue.shade600 : Colors.grey.shade400,
-                    size: 28,
-                  ),
-                )
-              else
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: Colors.grey.shade300,
-                  backgroundImage: chat.avatarUrl != null && chat.avatarUrl!.isNotEmpty
-                      ? NetworkImage(chat.avatarUrl!)
-                      : null,
-                  child: chat.avatarUrl == null || chat.avatarUrl!.isEmpty
-                      // Logika pengecekan: Jika chat adalah Group, gunakan ikon grup berombongan (Icons.group)
-                      // Jika personal, gunakan ikon orang tunggal (Icons.person)
-                      ? Icon(
-                          chat.isGroup ? Icons.groups : Icons.person,
-                          color: Colors.grey.shade600,
-                          size: 28,
-                        )
-                      : null,
-                ),
-              const SizedBox(width: 12),
-
-              // ── Content ──
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Row 1: Name
+                    // ── Avatar ──
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: _selectedChats.isNotEmpty
+                          ? Container(
+                              width: 48,
+                              height: 48,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+                                color: isSelected ? Colors.blue.shade600 : Colors.grey.shade400,
+                                size: 28,
+                              ),
+                            )
+                          : CircleAvatar(
+                              radius: 24,
+                              backgroundColor: Colors.grey.shade300,
+                              backgroundImage: chat.avatarUrl != null && chat.avatarUrl!.isNotEmpty
+                                  ? NetworkImage(chat.avatarUrl!)
+                                  : null,
+                              child: chat.avatarUrl == null || chat.avatarUrl!.isEmpty
+                                  // Logika pengecekan: Jika chat adalah Group, gunakan ikon grup berombongan (Icons.group)
+                                  // Jika personal, gunakan ikon orang tunggal (Icons.person)
+                                  ? Icon(
+                                      chat.isGroup ? Icons.groups : Icons.person,
+                                      color: Colors.grey.shade600,
+                                      size: 28,
+                                    )
+                                  : null,
+                            ),
+                    ),
+                    const SizedBox(width: 12),
+                    
+                    // ── Content ──
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Row 1: Name
                     Row(
                       children: [
                         Expanded(
@@ -1243,63 +1246,69 @@ class _ChatListPageState extends State<ChatListPage> with SingleTickerProviderSt
               
               // ── Trailing Content (Sisi Kanan) ──
               Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Jam & Pin (Row teratas sisi kanan)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        _formatTime(chat.time),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade500,
-                        ),
+                      // Jam & Pin (Row teratas sisi kanan)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _formatTime(chat.time),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                          if (chat.isBlocked) ...[
+                            const SizedBox(width: 4),
+                            const Icon(Icons.person_off, size: 14, color: Colors.red),
+                          ],
+                          if (chat.isPinned) ...[
+                            const SizedBox(width: 4),
+                            Icon(Icons.push_pin, size: 14, color: Colors.blue.shade400),
+                          ],
+                        ],
                       ),
-                      if (chat.isBlocked) ...[
-                        const SizedBox(width: 4),
-                        const Icon(Icons.person_off, size: 14, color: Colors.red),
-                      ],
-                      if (chat.isPinned) ...[
-                        const SizedBox(width: 4),
-                        Icon(Icons.push_pin, size: 14, color: Colors.blue.shade400),
+                      
+                      // Badge Unread
+                      if (chat.unreadCount > 0) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          constraints: const BoxConstraints(
+                            minWidth: 20,
+                            minHeight: 20,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            chat.unreadCount > 99 ? '99+' : chat.unreadCount.toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ],
                     ],
                   ),
                   
-                  // Badge Unread
-                  if (chat.unreadCount > 0) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 20,
-                        minHeight: 20,
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.blue,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        chat.unreadCount > 99 ? '99+' : chat.unreadCount.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                  
                   // Status badge
-                  const SizedBox(height: 6),
                   _buildStatusBadge(chat.status),
                 ],
               ),
             ],
           ),
         ),
+      ),
       ),
       Container(
         margin: const EdgeInsets.symmetric(horizontal: 12),

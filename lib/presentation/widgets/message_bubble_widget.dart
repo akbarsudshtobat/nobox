@@ -1331,9 +1331,9 @@ class _MessageBubbleWidgetState extends State<MessageBubbleWidget>
         icon = Icons.error_outline;
         color = Colors.red;
         break;
-      case 5: // Read
+      case 5: // Read — same as delivered per nobox.ai standard
         icon = Icons.done_all;
-        color = AppTheme.primaryColor;
+        color = Colors.grey;
         break;
       default:
         icon = Icons.check;

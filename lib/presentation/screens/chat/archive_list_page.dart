@@ -324,44 +324,47 @@ class _ArchiveListPageState extends State<ArchiveListPage> {
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── Avatar ──
-                  if (_selectedChats.isNotEmpty)
-                    Container(
-                      width: 48,
-                      height: 48,
-                      alignment: Alignment.center,
-                      child: Icon(
-                        isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
-                        color: isSelected ? Colors.blue.shade600 : Colors.grey.shade400,
-                        size: 28,
-                      ),
-                    )
-                  else
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
-                      backgroundImage: chat.avatarUrl != null && chat.avatarUrl!.isNotEmpty
-                          ? NetworkImage(chat.avatarUrl!)
-                          : null,
-                      child: chat.avatarUrl == null || chat.avatarUrl!.isEmpty
-                          ? Icon(
-                              chat.isGroup ? Icons.group : Icons.person,
-                              color: isDark ? Colors.grey.shade500 : Colors.grey.shade600,
-                              size: 28,
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // ── Avatar ──
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: _selectedChats.isNotEmpty
+                          ? Container(
+                              width: 48,
+                              height: 48,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+                                color: isSelected ? Colors.blue.shade600 : Colors.grey.shade400,
+                                size: 28,
+                              ),
                             )
-                          : null,
+                          : CircleAvatar(
+                              radius: 24,
+                              backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                              backgroundImage: chat.avatarUrl != null && chat.avatarUrl!.isNotEmpty
+                                  ? NetworkImage(chat.avatarUrl!)
+                                  : null,
+                              child: chat.avatarUrl == null || chat.avatarUrl!.isEmpty
+                                  ? Icon(
+                                      chat.isGroup ? Icons.group : Icons.person,
+                                      color: isDark ? Colors.grey.shade500 : Colors.grey.shade600,
+                                      size: 28,
+                                    )
+                                  : null,
+                            ),
                     ),
-                  const SizedBox(width: 12),
+                    const SizedBox(width: 12),
 
-                  // ── Content ──
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Nama Pengirim
+                    // ── Content ──
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Nama Pengirim
                         Row(
                           children: [
                             Expanded(
@@ -443,50 +446,55 @@ class _ArchiveListPageState extends State<ArchiveListPage> {
                   
                   // ── Trailing Content (Sisi Kanan) ──
                   Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      // Jam & Pin (Opsional untuk archived)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(
-                            _formatTime(chat.time),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? Colors.grey.shade400 : Colors.grey.shade500,
-                            ),
+                          // Jam & Pin (Opsional untuk archived)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _formatTime(chat.time),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade500,
+                                ),
+                              ),
+                              if (chat.isPinned) ...[
+                                const SizedBox(width: 4),
+                                Icon(Icons.push_pin, size: 14, color: Colors.blue.shade400),
+                              ],
+                            ],
                           ),
-                          if (chat.isPinned) ...[
-                            const SizedBox(width: 4),
-                            Icon(Icons.push_pin, size: 14, color: Colors.blue.shade400),
+                          
+                          // Badge Unread (Daftar Arsip juga menampilkan unread jika ada pesan baru)
+                          if (chat.unreadCount > 0) ...[
+                            const SizedBox(height: 6),
+                            Container(
+                              width: 20,
+                              height: 20,
+                              decoration: const BoxDecoration(
+                                color: Colors.blue,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                chat.unreadCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                           ],
                         ],
                       ),
                       
-                      // Badge Unread (Daftar Arsip juga menampilkan unread jika ada pesan baru)
-                      if (chat.unreadCount > 0) ...[
-                        const SizedBox(height: 6),
-                        Container(
-                          width: 20,
-                          height: 20,
-                          decoration: const BoxDecoration(
-                            color: Colors.blue,
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            chat.unreadCount.toString(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                      
                       // Status badge
-                      const SizedBox(height: 6),
                       _buildStatusBadge(chat.status, isDark),
                     ],
                   ),
@@ -494,6 +502,7 @@ class _ArchiveListPageState extends State<ArchiveListPage> {
               ),
             ),
           ),
+        ),
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 12),
             height: 0.5,

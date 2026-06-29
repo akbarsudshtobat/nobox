@@ -21,6 +21,7 @@ class ContactInfoPage extends StatefulWidget {
 class _ContactInfoPageState extends State<ContactInfoPage> {
   late bool _needReply;
   late bool _muteAIAgent;
+  late bool _isBlocked;
   late String _currentAccount;
   late String _currentFunnel;
   late List<String> _currentTags;
@@ -52,6 +53,7 @@ class _ContactInfoPageState extends State<ContactInfoPage> {
     super.initState();
     _needReply = widget.chat.needReply;
     _muteAIAgent = widget.chat.muteAiAgent;
+    _isBlocked = widget.chat.isBlocked;
     _currentAccount = 'Not Set';
     _currentFunnel = widget.chat.funnel;
     _currentTags = List.from(widget.chat.tags);
@@ -72,7 +74,7 @@ class _ContactInfoPageState extends State<ContactInfoPage> {
 
   @override
   void dispose() {
-    _dismissFunnelOverlay();
+    _dismissFunnelOverlay(updateState: false);
     super.dispose();
   }
 
@@ -304,7 +306,7 @@ class _ContactInfoPageState extends State<ContactInfoPage> {
     );
   }
 
-  void _dismissFunnelOverlay() {
+  void _dismissFunnelOverlay({bool updateState = true}) {
     try {
       if (_funnelOverlayEntry != null && _funnelOverlayEntry!.mounted) {
         _funnelOverlayEntry?.remove();
@@ -313,7 +315,7 @@ class _ContactInfoPageState extends State<ContactInfoPage> {
       debugPrint('Error removing funnel overlay: $e');
     }
     _funnelOverlayEntry = null;
-    if (mounted) setState(() {});
+    if (updateState && mounted) setState(() {});
   }
 
   void _showFunnelOverlay() async {
@@ -2081,7 +2083,7 @@ class _ContactInfoPageState extends State<ContactInfoPage> {
   }
 
   void _showBlockDialog(BuildContext context, bool isDark, String contactName) {
-    final isCurrentlyBlocked = widget.chat.isBlocked;
+    final isCurrentlyBlocked = _isBlocked;
     final actionName = isCurrentlyBlocked ? 'Unblock' : 'Block';
     final actionDesc = isCurrentlyBlocked 
         ? 'Are you sure you want to unblock this contact? You will receive messages from them.'
@@ -2152,13 +2154,17 @@ class _ContactInfoPageState extends State<ContactInfoPage> {
                 );
                 
                 final chatProvider = Provider.of<ChatProvider>(this.context, listen: false);
-                final success = await chatProvider.toggleBlockContact(widget.chat.id, widget.chat.contactId, !isCurrentlyBlocked);
+                final newBlockedState = !isCurrentlyBlocked;
+                final success = await chatProvider.toggleBlockContact(widget.chat.id, widget.chat.contactId, newBlockedState);
                 
                 if (!mounted) return;
                 Navigator.pop(this.context); // hide loading
                 
                 if (success) {
-                  // Minta background hijau agak transparan sesuai request
+                  // FIX Bug #4: Update local state so UI is reactive
+                  setState(() {
+                    _isBlocked = newBlockedState;
+                  });
                   ScaffoldMessenger.of(this.context).showSnackBar(
                     SnackBar(
                       content: Text(isCurrentlyBlocked ? 'unblock sukses' : 'block sukses'),

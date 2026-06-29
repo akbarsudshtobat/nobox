@@ -58,6 +58,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   StreamSubscription<Map<String, dynamic>>? _terimaSubSpvSub;
   StreamSubscription<int>? _ucChangedSub;
   StreamSubscription<bool>? _reconnectSub;
+  StreamSubscription<Map<String, dynamic>>? _blockUnblockSub;
   Timer? _messagePollingTimer;
   bool _isPolling = false;
   bool _wasInBackground = false; // Tracks if app went to background
@@ -188,6 +189,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       debugPrint('Main: Session expired event received');
       _handleSessionExpired();
     };
+
+    // ── TerimaBlockUnblock: block/unblock from web → update local state ──
+    _blockUnblockSub = signalR.onBlockUnblock.listen((data) {
+      final roomId = data['roomId']?.toString() ?? '';
+      final isBlocked = data['isBlocked'] == true;
+      debugPrint('Main: TerimaBlockUnblock | room=$roomId | isBlocked=$isBlocked');
+      try {
+        final chatProvider = context.read<ChatProvider>();
+        chatProvider.updateBlockStatusFromSignalR(roomId, isBlocked);
+      } catch (e) {
+        debugPrint('Main: Could not update block status: $e');
+      }
+    });
   }
 
   // ── Session Expired Handler ──
@@ -280,6 +294,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     _terimaSubSpvSub?.cancel();
     _ucChangedSub?.cancel();
     _reconnectSub?.cancel();
+    _blockUnblockSub?.cancel();
     _messagePollingTimer?.cancel();
     super.dispose();
   }

@@ -88,6 +88,7 @@ class SignalRService {
           .withUrl(
             AppConfig.signalRUrl,
             options: HttpConnectionOptions(
+              requestTimeout: 30000,
               accessTokenFactory: () async {
                 // Always read fresh token (handles token refresh/expiry)
                 const storage = FlutterSecureStorage();
@@ -561,9 +562,9 @@ class SignalRService {
       throw Exception('SignalR not connected');
     }
     try {
-      debugPrint('SignalR: Sending "$methodName" with args: $args');
-      await _hubConnection!.send(methodName, args: args);
-      debugPrint('SignalR: ✅ "$methodName" sent successfully');
+      debugPrint('SignalR: Invoking "$methodName" with args: $args');
+      await _hubConnection!.invoke(methodName, args: args);
+      debugPrint('SignalR: ✅ "$methodName" invoked successfully');
     } catch (e) {
       debugPrint('SignalR: ❌ Error sending "$methodName": $e');
       rethrow;
@@ -600,6 +601,48 @@ class SignalRService {
       return true;
     } catch (e) {
       debugPrint('SignalR: ❌ Failed to send ContactBlockUnblock: $e');
+      return false;
+    }
+  }
+
+  /// Invoke KirimPesan (Send Message via SignalR)
+  Future<bool> invokeKirimPesan({
+    required dynamic idLink,
+    required dynamic idAccount,
+    required dynamic idRoom,
+    dynamic idGroup,
+    required String type, // "1" for text, "3" for media
+    String? msg,
+    String? fileJson,
+  }) async {
+    try {
+      final payload = {
+        "Room": {
+          "IdLink": idLink is int ? idLink : int.tryParse(idLink?.toString() ?? ''),
+          "IdGroup": idGroup is int ? idGroup : int.tryParse(idGroup?.toString() ?? ''),
+          "IdAccount": idAccount is int ? idAccount : int.tryParse(idAccount?.toString() ?? ''),
+          "IdRoom": idRoom is int ? idRoom : int.tryParse(idRoom?.toString() ?? '')
+        },
+        "Msg": {
+          "Type": type,
+          "Msg": msg,
+          "File": fileJson, // Expecting stringified JSON like "{\"Filename\":\"...\"}"
+          "Files": null,
+          "ReplyId": null
+        }
+      };
+
+      // Payload must be sent as a single JSON string argument according to the network log
+      final jsonPayload = jsonEncode(payload);
+      
+      debugPrint('SignalR: ✉️ Invoking KirimPesan: $jsonPayload');
+      await invoke(
+        'KirimPesan',
+        args: [jsonPayload],
+      );
+      return true;
+    } catch (e) {
+      debugPrint('SignalR: ❌ Failed to send KirimPesan: $e');
       return false;
     }
   }

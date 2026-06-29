@@ -23,6 +23,7 @@ class ChatService {
 
   // Cache account data to ensure AccountIds is always populated for sendMessage 
   static final Map<String, String> _accountById = {};
+  static final Map<int, String> _accountIdByChannel = {};
   static String? _singleAccountId;
   static String? _singleAccountName;
 
@@ -615,6 +616,7 @@ class ChatService {
               }
             }
             
+            _accountIdByChannel.addAll(accountIdByChannel);
             debugPrint('ChatService: _accountById=$_accountById, single=$_singleAccountName');
 
             // Inject account name into conversations
@@ -958,6 +960,33 @@ class ChatService {
     }
   }
 
+  /// Helper untuk membangun Telegram ExtId yang valid dan mencegah double-encoding JSON
+  String _buildTelegramExtId(String rawExtId, String? username, String? accessHash) {
+    if (rawExtId.isEmpty) return rawExtId;
+    
+    bool isJson = false;
+    Map<String, dynamic> existingJson = {};
+    try {
+      final decoded = jsonDecode(rawExtId);
+      if (decoded is Map) {
+        isJson = true;
+        existingJson = Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {}
+
+    final extIdMap = <String, dynamic>{};
+    if (isJson) {
+      extIdMap.addAll(existingJson);
+      if (username != null && username.isNotEmpty) extIdMap['Username'] = username;
+      if (accessHash != null && accessHash.isNotEmpty) extIdMap['AccessHash'] = accessHash;
+    } else {
+      extIdMap['ExtId'] = rawExtId;
+      if (username != null && username.isNotEmpty) extIdMap['Username'] = username;
+      if (accessHash != null && accessHash.isNotEmpty) extIdMap['AccessHash'] = accessHash;
+    }
+    return jsonEncode(extIdMap);
+  }
+
   /// Retrieve ExtId for a contact. For Telegram (channelId=2), returns a JSON
   /// string containing ExtId, Username, and AccessHash per mentor instruction.
   Future<String?> _getExtId(String? contactId, {int channelId = 1}) async {
@@ -1006,14 +1035,7 @@ class ChatService {
               if (idExt != null && idExt.isNotEmpty) {
                 extId = idExt;
               }
-              final extIdMap = <String, dynamic>{'ExtId': extId};
-              if (username != null && username.isNotEmpty) {
-                extIdMap['Username'] = username;
-              }
-              if (accessHash != null && accessHash.isNotEmpty) {
-                extIdMap['AccessHash'] = accessHash;
-              }
-              final jsonStr = jsonEncode(extIdMap);
+              final jsonStr = _buildTelegramExtId(extId, username, accessHash);
               debugPrint('ChatService: _getExtId Telegram JSON: $jsonStr');
               return jsonStr;
             }
@@ -1128,7 +1150,16 @@ class ChatService {
       String safeAccountId = '';
       if (request.accountId != null && request.accountId!.isNotEmpty) {
         safeAccountId = request.accountId!;
-      } else if (_singleAccountId != null && _singleAccountId!.isNotEmpty) {
+      }
+      
+      final int channelId = int.tryParse(request.channelId ?? '1') ?? 1;
+
+      if (safeAccountId.isEmpty && _accountIdByChannel.containsKey(channelId)) {
+        safeAccountId = _accountIdByChannel[channelId]!;
+        debugPrint('ChatService: AccountId was empty, using fallback for channel $channelId -> $safeAccountId');
+      }
+
+      if (safeAccountId.isEmpty && _singleAccountId != null && _singleAccountId!.isNotEmpty) {
         safeAccountId = _singleAccountId!;
       }
       safeAccountId = safeAccountId.replaceAll('[', '').replaceAll(']', '').replaceAll('"', '').trim();
@@ -1184,23 +1215,12 @@ class ChatService {
         extId = request.extId!;
       }
 
-      final int channelId = int.tryParse(request.channelId ?? '1') ?? 1;
 
-      // Telegram (ChannelId=2): ExtId must be a JSON string containing
-      // ExtId, Username, and AccessHash per mentor's instruction.
-      // If Username/AccessHash not available, include ExtId only.
+
+      // Mentor's test_api_6.dart confirms that Inbox/Send for Telegram requires 
+      // ExtId as the plain string ID and LinkId as a long/int.
+      // Do NOT send ExtId as a JSON string here, it causes backend errors when LinkId is present!
       String finalExtId = extId;
-      if (channelId == 2 && extId.isNotEmpty) {
-        final extIdMap = <String, dynamic>{'ExtId': extId};
-        if (telegramUsername != null && telegramUsername.isNotEmpty) {
-          extIdMap['Username'] = telegramUsername;
-        }
-        if (telegramAccessHash != null && telegramAccessHash.isNotEmpty) {
-          extIdMap['AccessHash'] = telegramAccessHash;
-        }
-        finalExtId = jsonEncode(extIdMap);
-        debugPrint('ChatService: Telegram ExtId formatted as JSON: $finalExtId');
-      }
 
       final Map<String, dynamic> payload = {
         'Body': content,
@@ -1211,11 +1231,10 @@ class ChatService {
         'Attachment': request.attachment ?? '',
       };
 
-      // NOTE: LinkId dihapus untuk Telegram karena backend error
-      // 'long' does not contain a definition for 'ExtId' — backend
-      // memprioritaskan LinkId (long) dan gagal akses .ExtId di atasnya.
-      // ExtId JSON string sudah cukup mengandung semua info.
-
+      // Wajib menyertakan LinkId agar Telegram background worker tahu routingnya
+      if (request.contactId != null && request.contactId!.isNotEmpty) {
+        payload['LinkId'] = int.tryParse(request.contactId!) ?? request.contactId;
+      }
 
       debugPrint('ChatService: ┌── sendMessage PAYLOAD FINAL ──');
       debugPrint(jsonEncode(payload));
@@ -1454,6 +1473,31 @@ class ChatService {
       debugPrint('ChatService: ┌── sendImageMessage PAYLOAD FINAL ──');
       debugPrint(jsonEncode(payload));
       debugPrint('ChatService: └──────────────────────────────');
+
+      if (chId == 2) {
+        // Use SignalR for Telegram media message
+        final fileJsonObj = {
+          "Filename": serverFileName,
+          "OriginalName": fileName,
+          "FileSize": "${(bytes.length / 1024).toStringAsFixed(1)} KB"
+        };
+        final signalRSuccess = await SignalRService().invokeKirimPesan(
+          idLink: contactId,
+          idAccount: safeAccountId,
+          idRoom: conversationId,
+          idGroup: null,
+          type: "3", // Media
+          fileJson: jsonEncode(fileJsonObj),
+        );
+        if (signalRSuccess) {
+          final fullUrl = (serverFileName != null && !serverFileName.startsWith('http'))
+              ? '${AppConfig.uploadUrl}$serverFileName'
+              : serverFileName;
+          return ApiResponse.success(fullUrl ?? filePath, 200);
+        } else {
+          return ApiResponse.failure('Gagal mengirim media Telegram via SignalR', 500);
+        }
+      }
 
       final sendResponse = await _apiClient.post(
       'https://id.nobox.ai/Inbox/Send?Id=$conversationId',

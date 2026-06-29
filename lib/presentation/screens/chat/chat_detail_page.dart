@@ -132,6 +132,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   String? _recordedVoicePath;
   int? _recordedVoiceDuration;
 
+  Timer? _ackPollTimer;
+
   @override
   void dispose() {
     // Reset notification suppression when leaving chat
@@ -151,6 +153,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     _audioPlayer.dispose();
     _recordingTimer?.cancel();
     _quickReplyDebounce?.cancel();
+    _ackPollTimer?.cancel();
     super.dispose();
   }
 
@@ -516,6 +519,86 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     }
   }
 
+  /// Starts a silent background polling to update acks if there are pending messages (ack < 3).
+  /// This is necessary because some channels (like WhatsApp) might not trigger push events for acks.
+  void _startChatSyncPolling() {
+    debugPrint('ChatSync: Started polling timer.');
+    _ackPollTimer?.cancel();
+    _ackPollTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final currentUserEmail = authProvider.currentUser ?? '';
+      
+      final response = await _chatService.getMessageHistory(chat.id, currentUserEmail);
+      if (!mounted) return;
+      
+      if (!response.isError && response.data != null) {
+        final newMessages = response.data!;
+        debugPrint('AckPolling: Fetched ${newMessages.length} messages. Matching...');
+        setState(() {
+          bool hasNewMessages = false;
+          final currentIds = _messages.map((m) => m.id).where((id) => id.isNotEmpty).toSet();
+          
+          for (final msg in newMessages) {
+            // 1. New message not in local list
+            if (msg.id.isNotEmpty && !currentIds.contains(msg.id)) {
+               _messages.add(msg);
+               hasNewMessages = true;
+            } 
+            // 2. Existing message, update ack
+            else if (msg.id.isNotEmpty) {
+               final existingIdx = _messages.indexWhere((m) => m.id == msg.id);
+               if (existingIdx != -1) {
+                 final oldMsg = _messages[existingIdx];
+                 if (msg.ack > oldMsg.ack) {
+                   _messages[existingIdx] = _messages[existingIdx].copyWith(
+                     ack: msg.ack,
+                     status: msg.ack >= 3 ? MessageStatus.delivered : MessageStatus.sent,
+                   );
+                 }
+               }
+            }
+          }
+
+          // 3. Match locally sent messages (without ID) to server messages
+          for (var i = 0; i < _messages.length; i++) {
+             final oldMsg = _messages[i];
+             if (oldMsg.isMe && oldMsg.id.isEmpty) {
+                 final newMsgIdx = newMessages.indexWhere((m) => m.content.trim() == oldMsg.content.trim() && m.isMe);
+                 if (newMsgIdx != -1) {
+                    final updatedMsg = newMessages[newMsgIdx];
+                    if (updatedMsg.id.isNotEmpty) {
+                      _messages[i] = _messages[i].copyWith(
+                          id: updatedMsg.id,
+                          ack: updatedMsg.ack,
+                          status: updatedMsg.ack >= 3 ? MessageStatus.delivered : MessageStatus.sent,
+                      );
+                    }
+                 }
+             }
+          }
+          
+          if (hasNewMessages) {
+            _scrollToBottom();
+            // Send read receipt
+            try {
+              final roomIdInt = int.tryParse(chat.id);
+              if (roomIdInt != null) {
+                SignalRService().sendReadCount(roomIdInt);
+              }
+            } catch (_) {}
+          }
+        });
+      } else {
+        debugPrint('AckPolling: ❌ API Error: ${response.error}');
+      }
+    });
+  }
+
   /// Subscribe to SignalR for real-time incoming messages
   void _subscribeToSignalR() {
     final signalR = SignalRService();
@@ -534,11 +617,54 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         return;
       }
 
-      // Skip our own outgoing messages (AgentId present = sent by agent/us)
+      // Own outgoing message echo-back (AgentId present = sent by agent/us)
+      // Instead of skipping entirely, check if Ack was updated by server
+      // so we can update centang (✓ → ✓✓) in real-time.
       final agentId = messageData['AgentId'];
       if (agentId != null && agentId != 0 && agentId.toString() != '0') {
-        debugPrint('SignalR: Skipping own outgoing message in room $incomingRoomId');
-        return;
+        final echoAck = messageData['Ack'] ?? messageData['ack'];
+        final echoId = messageData['Id']?.toString() ?? '';
+        final echoMsg = messageData['Msg']?.toString() ?? '';
+        int newAck = 2;
+        if (echoAck is int) {
+          newAck = echoAck;
+        } else if (echoAck is String) {
+          newAck = int.tryParse(echoAck) ?? 2;
+        }
+
+        debugPrint('SignalR: 🔁 Own echo-back | id=$echoId | ack=$newAck | msg=$echoMsg');
+
+        if (mounted && newAck > 1) {
+          setState(() {
+            // Try to match by message ID first
+            int matchIdx = -1;
+            if (echoId.isNotEmpty) {
+              matchIdx = _messages.indexWhere((m) => m.id == echoId && m.isMe);
+            }
+            // Fallback: match by content for messages without ID (just sent)
+            if (matchIdx == -1 && echoMsg.isNotEmpty) {
+              // Find the last sent message with matching content that has ack < newAck
+              for (int i = _messages.length - 1; i >= 0; i--) {
+                if (_messages[i].isMe &&
+                    _messages[i].content == echoMsg &&
+                    _messages[i].ack < newAck) {
+                  matchIdx = i;
+                  break;
+                }
+              }
+            }
+
+            if (matchIdx != -1 && _messages[matchIdx].ack < newAck) {
+              debugPrint('SignalR: ✅ Updating ack ${_messages[matchIdx].ack} → $newAck for message at index $matchIdx');
+              _messages[matchIdx] = _messages[matchIdx].copyWith(
+                id: echoId.isNotEmpty ? echoId : null,
+                ack: newAck,
+                status: newAck >= 3 ? MessageStatus.delivered : MessageStatus.sent,
+              );
+            }
+          });
+        }
+        return; // Don't add as a new message
       }
 
       // Extract content from NoBox payload
@@ -641,6 +767,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       _statusProvider = Provider.of<ChatStatusProvider>(context, listen: false);
       _loadInitialMessages();
       _subscribeToSignalR();
+      _startChatSyncPolling(); // <-- START CONTINUOUS SYNC
       _fetchQuickReplies('');
     });
   }
@@ -807,27 +934,46 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
     final messageIndex = _messages.indexOf(newMessage);
 
-    // Use contactId for Inbox/Send endpoint
-    final inboxId = chat.id; // Use RoomId for Inbox/Send
-    final response = await _chatService.sendMessage(
-      MessageRequest(
-        receiver: chat.id,
-        content: content,
-        accountId: chat.accountId,
-        channelId: chat.chId,
-        contactId: chat.contactId,
-        extId: chat.ctRealId,
-      ),
-    );
+    // Check if it's Telegram (channel type or chId)
+    final isTelegram = chat.chId == '2' || chat.channelType.toLowerCase().contains('telegram');
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+
+    bool isSuccess = false;
+    String? errorMsg;
+
+    if (isTelegram) {
+      // Use SignalR for Telegram text message
+      isSuccess = await chatProvider.sendMessageViaSignalR(
+        chat: chat,
+        type: "1", // 1 is for Text
+        msg: content,
+      );
+      if (!isSuccess) errorMsg = 'Failed to send via SignalR';
+    } else {
+      // Use REST API for other channels
+      final response = await _chatService.sendMessage(
+        MessageRequest(
+          receiver: chat.id,
+          content: content,
+          accountId: chat.accountId,
+          channelId: chat.chId,
+          contactId: chat.contactId,
+          extId: chat.ctRealId,
+        ),
+      );
+      isSuccess = !response.isError;
+      errorMsg = response.error;
+    }
 
     if (mounted && messageIndex < _messages.length) {
-      if (!response.isError) {
+      if (isSuccess) {
         setState(() {
           _messages[messageIndex] = _messages[messageIndex].copyWith(
             status: MessageStatus.delivered,
             ack: 2,
           );
         });
+        _startChatSyncPolling();
       } else {
         setState(() {
           _messages[messageIndex] = _messages[messageIndex].copyWith(
@@ -836,7 +982,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send: ${response.error}'),
+            content: Text('Failed to send: $errorMsg'),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -1156,7 +1302,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
 
     setState(() {
-      _messages.insert(0, newMessage);
+      _messages.add(newMessage);
     });
 
     _scrollToBottom();
@@ -1241,7 +1387,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
 
     setState(() {
-      _messages.insert(0, newMessage);
+      _messages.add(newMessage);
     });
 
     _scrollToBottom();
@@ -1391,7 +1537,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       );
 
       setState(() {
-        _messages.insert(0, voiceMessage);
+        _messages.add(voiceMessage);
       });
       _scrollToBottom();
 
